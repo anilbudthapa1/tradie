@@ -1,0 +1,62 @@
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# Go
+/backend/bin/
+/backend/tmp/
+*.test
+*.out
+
+# Node / Web
+node_modules/
+.next/
+build/
+dist/
+.cache/
+*.tsbuildinfo
+
+# Flutter / Dart
+**/.dart_tool/
+**/.flutter-plugins
+**/.flutter-plugins-dependencies
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/build/
+**/ios/Pods/
+**/ios/.symlinks/
+**/android/.gradle/
+**/android/local.properties
+**/android/key.properties
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Graphify (generated / cache)
+graphify-out/
+.graphify_*.json
+.graphify_*.txt
+.graphify_python
+
+# Claude Code (per-user)
+.claude/settings.local.json
+
+# Large binaries / installers
+*.exe
+*.dmg
+*.iso
