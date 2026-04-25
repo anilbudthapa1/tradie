@@ -1,0 +1,611 @@
+# 7. Multi-Tenant Business Account Module — Final
+
+## Main Purpose
+
+This module allows many businesses to use **Tradie Job Manager** safely in one SaaS platform.
+
+Core rule:
+
+```txt
+One business = one tenant
+Every user, job, invoice, employee, file, report, payslip, and setting belongs to one business_id.
+```
+
+It prevents:
+
+```txt
+Business A seeing Business B data
+Employee accessing another company’s jobs
+Wrong tax/payroll export
+Cross-tenant file access
+IDOR vulnerabilities
+```
+
+---
+
+# What We Will Implement
+
+## 1. Tenant / Business Account Creation
+
+When an owner registers:
+
+```txt
+Create business account
+Generate business_id UUID
+Link owner to business_id
+Create default settings
+Create trial subscription
+Create audit log
+```
+
+---
+
+## 2. Tenant Data Isolation
+
+Every business-owned table must include:
+
+```sql
+business_id UUID NOT NULL
+```
+
+Applies to:
+
+```txt
+users
+employees
+customers
+jobs
+quotes
+invoices
+payments
+bills
+tax reports
+payslips
+WorkSafe records
+files
+settings
+audit logs
+subscriptions
+```
+
+---
+
+## 3. UUID-Based IDs
+
+Use UUIDs instead of sequential IDs.
+
+```txt
+business_id UUID
+user_id UUID
+job_id UUID
+invoice_id UUID
+customer_id UUID
+```
+
+Why:
+
+```txt
+harder to guess records
+reduces IDOR risk
+better for distributed systems
+```
+
+---
+
+## 4. Application-Level Tenant Enforcement
+
+Every backend query must filter by current user’s business:
+
+```sql
+SELECT * FROM jobs
+WHERE id = :job_id
+AND business_id = :current_business_id;
+```
+
+Never trust `business_id` from frontend.
+
+Bad:
+
+```json
+{
+  "business_id": "abc",
+  "job_name": "Fix sink"
+}
+```
+
+Good:
+
+```txt
+business_id comes from logged-in session only
+```
+
+---
+
+## 5. PostgreSQL Row-Level Security
+
+Use RLS from early stage for stronger isolation.
+
+Concept:
+
+```sql
+ALTER TABLE jobs ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation_jobs
+ON jobs
+USING (business_id = current_setting('app.current_business_id')::uuid);
+```
+
+This gives double protection:
+
+```txt
+Backend tenant check + Database tenant check
+```
+
+---
+
+## 6. Tenant-Aware Middleware
+
+Backend middleware should attach:
+
+```txt
+current_user
+current_business_id
+current_role
+current_subscription
+```
+
+Required middleware:
+
+```txt
+authMiddleware
+tenantMiddleware
+rbacMiddleware
+subscriptionMiddleware
+resourceTenantGuard
+auditMiddleware
+```
+
+---
+
+# Core Database Tables
+
+## businesses
+
+```sql
+id UUID PRIMARY KEY
+legal_business_name
+trading_name
+abn
+acn
+business_structure
+industry_type
+gst_registered
+business_email
+business_phone
+status
+created_at
+updated_at
+deleted_at
+```
+
+## users
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID REFERENCES businesses(id)
+full_name
+email
+phone
+role
+status
+created_at
+updated_at
+deleted_at
+```
+
+## customers
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID REFERENCES businesses(id)
+name
+email
+phone
+address
+created_at
+updated_at
+deleted_at
+```
+
+## jobs
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID REFERENCES businesses(id)
+customer_id UUID
+title
+description
+status
+scheduled_at
+created_at
+updated_at
+deleted_at
+```
+
+## invoices
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID REFERENCES businesses(id)
+customer_id UUID
+job_id UUID
+invoice_number
+total_amount
+status
+created_at
+updated_at
+deleted_at
+```
+
+## files
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID REFERENCES businesses(id)
+owner_type
+owner_id
+file_name
+storage_key
+mime_type
+file_size
+created_at
+deleted_at
+```
+
+## audit_logs
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID
+user_id UUID
+event_type
+old_value
+new_value
+ip_address
+user_agent
+metadata
+created_at
+```
+
+---
+
+# Scoped Unique Constraints
+
+Each business should have its own numbering and records.
+
+Use:
+
+```sql
+UNIQUE (business_id, invoice_number)
+UNIQUE (business_id, employee_code)
+UNIQUE (business_id, customer_email)
+UNIQUE (business_id, quote_number)
+```
+
+Example:
+
+```txt
+ABC Plumbing: INV-0001
+XYZ Electrical: INV-0001
+```
+
+---
+
+# File Storage Isolation
+
+Use S3-compatible storage paths:
+
+```txt
+/businesses/{business_id}/jobs/{job_id}/photos/{file_id}.jpg
+/businesses/{business_id}/invoices/{invoice_id}/invoice.pdf
+/businesses/{business_id}/payslips/{payslip_id}.pdf
+/businesses/{business_id}/worksafe/{report_id}/evidence.jpg
+```
+
+Rules:
+
+```txt
+No public file access
+Use signed URLs
+Check business_id before generating signed URL
+Never expose raw storage paths
+```
+
+---
+
+# Tenant-Safe Soft Delete
+
+Do not hard-delete important business records.
+
+Use:
+
+```sql
+deleted_at
+deleted_by
+delete_reason
+```
+
+Important for:
+
+```txt
+invoices
+tax records
+payslips
+WorkSafe reports
+employee records
+audit records
+```
+
+---
+
+# Immutable Audit Logs
+
+Audit logs should not be editable by normal users.
+
+Track:
+
+```txt
+who changed it
+what changed
+old value
+new value
+business_id
+IP address
+device/browser
+timestamp
+```
+
+Audit events:
+
+```txt
+BUSINESS_CREATED
+BUSINESS_PROFILE_UPDATED
+TENANT_ACCESS_DENIED
+CROSS_TENANT_ACCESS_ATTEMPT
+BUSINESS_DATA_EXPORTED
+FILE_ACCESS_DENIED
+INVOICE_EXPORTED
+PAYSLIP_VIEWED
+TAX_REPORT_EXPORTED
+```
+
+---
+
+# Tenant-Level Encryption
+
+Encrypt sensitive tenant data:
+
+```txt
+TFN
+bank account number
+payroll data
+employee documents
+tax reports
+payslips
+insurance documents
+```
+
+Recommended:
+
+```txt
+database encryption at rest
+field-level encryption for sensitive fields
+separate encryption keys per tenant later
+```
+
+---
+
+# Tenant-Aware Backup and Export
+
+Each business must be exportable safely.
+
+Owner can export only:
+
+```txt
+their own business data
+their own invoices
+their own payroll
+their own tax reports
+their own files
+```
+
+Backup/restore must be scoped by:
+
+```txt
+business_id
+```
+
+---
+
+# API Endpoints
+
+## Business
+
+```txt
+GET    /api/business/me
+PATCH  /api/business/me
+GET    /api/business/settings
+PATCH  /api/business/settings
+GET    /api/business/onboarding-status
+GET    /api/business/usage-summary
+POST   /api/business/export-data
+```
+
+## Internal Platform Admin Later
+
+```txt
+GET    /api/platform/businesses
+GET    /api/platform/businesses/:id
+PATCH  /api/platform/businesses/:id/status
+```
+
+Platform admin access must be heavily audited.
+
+---
+
+# Frontend Pages
+
+```txt
+/business/profile
+/business/settings
+/business/onboarding
+/business/data-export
+/business/security
+```
+
+---
+
+# Frontend Components
+
+```txt
+BusinessProfileForm
+BusinessSettingsForm
+OnboardingStatusCard
+BusinessUsageSummary
+DataExportPanel
+TenantAccessDenied
+BusinessSecurityCard
+```
+
+---
+
+# Backend Techniques with Go
+
+Use:
+
+```txt
+Go middleware for tenant context
+PostgreSQL for relational tenant data
+Redis for tenant-aware sessions/cache
+S3-compatible storage for files
+REST API for frontend
+WebSocket later for real-time tenant events
+```
+
+Each request context should include:
+
+```go
+CurrentUserID
+CurrentBusinessID
+CurrentRole
+CurrentPlan
+```
+
+---
+
+# Security Rules
+
+```txt
+Deny by default
+Never trust frontend business_id
+Always derive tenant from session
+Every query must include business_id
+Every file access must check business_id
+Every export must check business_id
+Every sensitive action must be audited
+Use UUIDs
+Use PostgreSQL RLS
+Use soft delete for legal/financial records
+```
+
+---
+
+# Implementation Phases
+
+## Phase 1 — Tenant Foundation
+
+Build:
+
+```txt
+businesses table
+UUID IDs
+business_id on users
+business_id on core tables
+tenant middleware
+business creation during owner registration
+```
+
+## Phase 2 — Tenant-Aware Core Features
+
+Apply tenant checks to:
+
+```txt
+customers
+employees
+jobs
+quotes
+invoices
+files
+settings
+```
+
+## Phase 3 — Database Hardening
+
+Add:
+
+```txt
+PostgreSQL Row-Level Security
+scoped unique constraints
+soft delete fields
+immutable audit logs
+```
+
+## Phase 4 — File and Export Isolation
+
+Add:
+
+```txt
+S3 tenant folder structure
+signed URLs
+tenant-safe PDF exports
+business-level data export
+```
+
+## Phase 5 — Advanced SaaS Control
+
+Add later:
+
+```txt
+tenant-level encryption keys
+subdomain per business
+platform admin controls
+tenant backup/restore
+data retention policies
+```
+
+---
+
+# Final Summary
+
+The **Multi-Tenant Business Account Module** will implement:
+
+```txt
+one business = one tenant
+UUID-based records
+business_id on all tenant data
+application-level tenant checks
+PostgreSQL RLS
+tenant-aware middleware
+scoped invoice/customer/employee numbering
+isolated file storage
+soft delete
+immutable audit logs
+tenant-safe exports
+field-level encryption for sensitive data
+```
+
+Final rule:
+
+```txt
+Every request, record, file, export, and report must be verified against current_user.business_id before access is allowed.
+```

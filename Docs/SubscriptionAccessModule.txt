@@ -1,0 +1,509 @@
+# 6. Subscription Access Control Module
+
+## Main Purpose
+
+The **Subscription Access Control Module** controls what each business can use based on their current plan, trial status, payment status, and feature limits.
+
+It answers:
+
+```txt
+Is this business allowed to use this feature?
+Is the trial active?
+Has payment failed?
+Has the business reached its plan limit?
+Should access be blocked, limited, or downgraded?
+```
+
+---
+
+# Plans for MVP
+
+| Plan       | Target            | Example Limits                        |
+| ---------- | ----------------- | ------------------------------------- |
+| Free Trial | New users         | 14 days, limited exports              |
+| Solo       | 1 owner/operator  | 1 employee, basic jobs/invoices       |
+| Team       | Small tradie team | up to 5 employees                     |
+| Business   | Growing company   | up to 15 employees, reports, WorkSafe |
+
+---
+
+# What We Will Implement
+
+## 1. Trial Access
+
+When owner registers:
+
+```txt
+create business
+create subscription
+plan = FREE_TRIAL
+trial_start = today
+trial_end = today + 14 days
+status = trialing
+```
+
+Trial users can access core features but may have limits.
+
+---
+
+## 2. Plan-Based Feature Access
+
+Example:
+
+| Feature           |   Trial |     Solo |  Team | Business |
+| ----------------- | ------: | -------: | ----: | -------: |
+| Jobs              |     Yes |      Yes |   Yes |      Yes |
+| Customers         |     Yes |      Yes |   Yes |      Yes |
+| Quotes            |     Yes |      Yes |   Yes |      Yes |
+| Invoices          |     Yes |      Yes |   Yes |      Yes |
+| Employees         | Limited |        1 |     5 |       15 |
+| Tax Reports       | Limited |    Basic | Basic |     Full |
+| WorkSafe          | Limited | No/Basic | Basic |     Full |
+| Payroll           | Limited |       No | Basic |     Full |
+| PDF Export        | Limited |      Yes |   Yes |      Yes |
+| Accountant Export |      No |       No |   Yes |      Yes |
+
+---
+
+## 3. Usage Limits
+
+Track limits such as:
+
+```txt
+number of employees
+number of customers
+number of monthly jobs
+number of PDF exports
+number of SMS notifications
+file storage size
+```
+
+Example:
+
+```txt
+Team plan = max 5 employees
+If owner tries to add 6th employee → block and show upgrade message
+```
+
+---
+
+## 4. Payment Status Control
+
+Subscription status examples:
+
+```txt
+trialing
+active
+past_due
+cancelled
+expired
+suspended
+```
+
+Access rules:
+
+| Status    | Access                           |
+| --------- | -------------------------------- |
+| trialing  | allowed until trial_end          |
+| active    | full plan access                 |
+| past_due  | grace period, then limited       |
+| cancelled | access until billing period ends |
+| expired   | read-only or blocked             |
+| suspended | blocked                          |
+
+---
+
+## 5. Grace Period
+
+If payment fails:
+
+```txt
+status = past_due
+grace period = 7 days
+send reminders
+after grace period → restrict access
+```
+
+During grace period:
+
+```txt
+allow login
+show billing warning
+allow core job access
+block exports/new employees maybe
+```
+
+---
+
+## 6. Read-Only Mode
+
+For expired/cancelled accounts:
+
+Allow:
+
+```txt
+login
+view existing data
+export own data
+update billing
+```
+
+Block:
+
+```txt
+create new jobs
+create invoices
+add employees
+send SMS
+generate new reports
+```
+
+This is better than suddenly locking all business data.
+
+---
+
+# Database Tables
+
+## subscriptions
+
+```sql
+id
+business_id
+plan_code
+status
+trial_start
+trial_end
+current_period_start
+current_period_end
+cancel_at_period_end
+grace_period_end
+provider
+provider_customer_id
+provider_subscription_id
+created_at
+updated_at
+```
+
+## plans
+
+```sql
+id
+plan_code
+plan_name
+monthly_price
+yearly_price
+is_active
+created_at
+updated_at
+```
+
+## plan_features
+
+```sql
+id
+plan_code
+feature_key
+enabled
+limit_value
+created_at
+updated_at
+```
+
+## usage_counters
+
+```sql
+id
+business_id
+feature_key
+usage_count
+period_start
+period_end
+updated_at
+```
+
+## billing_events
+
+```sql
+id
+business_id
+event_type
+provider_event_id
+status
+metadata
+created_at
+```
+
+---
+
+# Feature Keys
+
+Use keys like:
+
+```txt
+jobs.create
+customers.create
+employees.create
+quotes.create
+invoices.create
+pdf.export
+tax_reports.view
+payroll.view
+worksafe.view
+sms.send
+storage.upload
+accountant_export.create
+```
+
+---
+
+# API Endpoints
+
+## Subscription
+
+```txt
+GET  /api/subscription/current
+GET  /api/subscription/plans
+POST /api/subscription/checkout
+POST /api/subscription/change-plan
+POST /api/subscription/cancel
+POST /api/subscription/resume
+```
+
+## Usage
+
+```txt
+GET /api/subscription/usage
+GET /api/subscription/feature-access/:feature_key
+```
+
+## Webhooks
+
+```txt
+POST /api/webhooks/stripe
+```
+
+---
+
+# Middleware
+
+Every protected feature should pass subscription checks.
+
+## subscriptionMiddleware
+
+Checks:
+
+```txt
+business subscription exists
+status is trialing or active
+trial not expired
+payment not overdue beyond grace period
+```
+
+## requireFeature("feature_key")
+
+Checks:
+
+```txt
+feature enabled for plan
+usage limit not exceeded
+business not read-only
+```
+
+Example:
+
+```txt
+POST /api/jobs
+→ authMiddleware
+→ tenantMiddleware
+→ requireFeature("jobs.create")
+→ create job
+```
+
+---
+
+# Access Control Logic
+
+## Example: Add Employee
+
+Check:
+
+```txt
+feature_key = employees.create
+current_employee_count < plan limit
+subscription active/trialing
+```
+
+If not allowed:
+
+```json
+{
+  "error": "Your current plan allows up to 5 employees. Upgrade to add more."
+}
+```
+
+## Example: Export Tax Report
+
+Check:
+
+```txt
+feature_key = tax_reports.export
+plan allows tax reports
+subscription active
+```
+
+## Example: Trial Expired
+
+```txt
+trial_end < today
+status = expired
+enable read-only mode
+show upgrade screen
+```
+
+---
+
+# Frontend Pages
+
+```txt
+/subscription
+/billing
+/upgrade
+/trial-expired
+/payment-failed
+```
+
+---
+
+# Frontend Components
+
+```txt
+PlanCard.jsx
+UpgradeModal.jsx
+BillingStatusBanner.jsx
+UsageLimitBar.jsx
+FeatureLockedCard.jsx
+TrialCountdown.jsx
+PaymentFailedNotice.jsx
+```
+
+---
+
+# Notifications
+
+Send:
+
+```txt
+trial started
+trial ending in 3 days
+trial expired
+payment failed
+grace period ending
+subscription activated
+subscription cancelled
+plan upgraded
+plan downgraded
+```
+
+---
+
+# Security Rules
+
+```txt
+Never trust frontend plan checks
+Always check subscription in backend
+Use Stripe webhooks as source of truth
+Verify webhook signatures
+Log all billing events
+Do not store card data yourself
+Use payment provider hosted checkout
+Deny by default if subscription state is invalid
+```
+
+---
+
+# Implementation Phases
+
+## Phase 1 — Internal Plan Control
+
+Build:
+
+```txt
+subscriptions table
+plans table
+plan_features table
+trial creation
+feature check middleware
+usage limit checks
+```
+
+## Phase 2 — Billing UI
+
+Build:
+
+```txt
+plans page
+current subscription page
+upgrade modal
+trial countdown
+usage limit display
+```
+
+## Phase 3 — Stripe Integration
+
+Build:
+
+```txt
+Stripe Checkout
+Stripe Customer Portal
+webhook handling
+payment status updates
+billing events
+```
+
+## Phase 4 — Grace Period + Read-Only Mode
+
+Build:
+
+```txt
+past_due handling
+grace period rules
+expired trial rules
+read-only mode
+data export access
+```
+
+---
+
+# Final Summary
+
+The **Subscription Access Control Module** will implement:
+
+```txt
+trial access
+plan-based feature access
+usage limits
+payment status checks
+grace periods
+read-only mode
+upgrade/downgrade flow
+Stripe billing integration
+backend feature enforcement
+```
+
+Core rule:
+
+```txt
+User permission says WHO can do it.
+Subscription access says WHETHER the business plan allows it.
+```
+
+Build order:
+
+```txt
+trial + plans
+→ feature limits
+→ billing UI
+→ Stripe checkout
+→ webhooks
+→ grace period/read-only mode
+```

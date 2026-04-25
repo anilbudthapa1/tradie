@@ -1,0 +1,577 @@
+# 2. User Registration Module — Full Details
+
+## Main Purpose
+
+The **User Registration Module** creates verified accounts for:
+
+1. **Business Owner**
+2. **Admin / Employee / Worker**
+3. **Accountant**
+4. **Customer portal user** later
+
+It must ensure every user is linked to the correct **business account**, role, permissions, tax/reporting setup, and security controls.
+
+---
+
+# What We Will Implement
+
+## 1. Business Owner Registration
+
+The owner creates the main business account.
+
+### Required Owner Details
+
+* Full legal name
+* Email
+* Mobile number
+* Password or passkey setup
+* Terms and privacy acceptance
+
+### Required Business Details
+
+* Legal business name
+* Trading name
+* ABN
+* ACN, if company
+* Business structure
+* Industry/trade type
+* GST registration status
+* GST registration date, if registered
+* Business email
+* Business phone
+* Registered business address
+* Trading/service address
+* Postal address
+* Financial year start/end
+* BAS reporting cycle
+* Accounting method: cash/accrual
+* Default GST rate
+* Invoice prefix
+* Payment terms
+* Bank account name
+* BSB
+* Account number
+* Payroll contact person
+* PAYG withholding status
+* Default superannuation rate
+* WorkSafe/state registration number, if applicable
+* Public liability insurance provider
+* Policy number
+* Insurance expiry date
+
+---
+
+# 2. Employee / Worker Registration
+
+Employees must **not create a separate business account**.
+
+They register through invitation only.
+
+### Flow
+
+```txt
+Owner/Admin invites employee
+→ employee receives invite link
+→ employee accepts invite
+→ employee creates login
+→ employee completes required profile
+→ system links employee to same business_id
+→ role and permissions are applied
+```
+
+### Required Employee Details
+
+* Full legal name
+* Preferred name
+* Email
+* Mobile number
+* Home address
+* Emergency contact name
+* Emergency contact phone
+* Role: worker, supervisor, admin, accountant
+* Employment type: full-time, part-time, casual, contractor
+* Job title/trade type
+* Start date
+* Hourly rate or salary
+* Pay cycle
+* Bank account name
+* BSB
+* Account number
+* Super fund name
+* Super fund USI
+* Super member number
+* Tax File Number, securely stored
+* White Card number, if required
+* Trade licence number, if required
+* Licence expiry date
+* Safety induction status
+
+---
+
+# 3. Accountant Registration
+
+Accountant access should be invite-only.
+
+### Accountant Can Access
+
+* bills
+* invoices
+* tax reports
+* BAS/GST reports
+* payroll reports, if allowed
+* export reports
+
+### Accountant Cannot Access By Default
+
+* job route tracking
+* worker private notes
+* customer messages
+* admin settings
+* passkey/session settings
+
+---
+
+# 4. Customer Registration Later
+
+Customers should only register through:
+
+```txt
+quote link
+invoice link
+booking link
+```
+
+Customer access is limited to:
+
+```txt
+their own quotes
+their own invoices
+their own bookings
+their own messages
+```
+
+---
+
+# Registration Rules
+
+## Owner Account Rule
+
+```txt
+Owner account becomes active only after:
+1. Email is verified
+2. Required business details are completed
+3. Terms/privacy are accepted
+```
+
+## Employee Account Rule
+
+```txt
+Employee account becomes active only after:
+1. Invite token is valid
+2. Email matches invited email
+3. Required employee profile is completed
+4. Role is assigned
+```
+
+## Tenant Rule
+
+Every user must belong to one `business_id`.
+
+```txt
+users.business_id = businesses.id
+```
+
+No user should access another business’s data.
+
+---
+
+# Database Tables
+
+## users
+
+```sql
+id
+business_id
+full_name
+email
+phone
+password_hash
+role
+status
+email_verified_at
+mfa_enabled
+created_at
+updated_at
+```
+
+## businesses
+
+```sql
+id
+legal_business_name
+trading_name
+abn
+acn
+business_structure
+industry_type
+gst_registered
+gst_registration_date
+business_email
+business_phone
+registered_address
+service_address
+postal_address
+financial_year_start
+financial_year_end
+bas_cycle
+accounting_method
+default_gst_rate
+status
+created_at
+updated_at
+```
+
+## business_payment_details
+
+```sql
+id
+business_id
+invoice_prefix
+default_payment_terms
+bank_account_name
+bsb
+account_number_encrypted
+payment_reference_format
+created_at
+updated_at
+```
+
+## payroll_settings
+
+```sql
+id
+business_id
+payg_withholding_status
+default_super_rate
+default_pay_cycle
+payroll_contact_name
+payroll_contact_email
+created_at
+updated_at
+```
+
+## business_compliance
+
+```sql
+id
+business_id
+worksafe_registration_number
+insurance_provider
+insurance_policy_number
+insurance_expiry_date
+created_at
+updated_at
+```
+
+## employee_profiles
+
+```sql
+id
+user_id
+business_id
+preferred_name
+home_address
+emergency_contact_name
+emergency_contact_phone
+employment_type
+job_title
+trade_type
+start_date
+hourly_rate
+salary
+pay_cycle
+bank_account_name
+bsb
+account_number_encrypted
+tfn_encrypted
+super_fund_name
+super_fund_usi
+super_member_number
+white_card_number
+trade_licence_number
+licence_expiry_date
+safety_induction_completed
+created_at
+updated_at
+```
+
+## team_invites
+
+```sql
+id
+business_id
+invited_email
+invited_role
+token_hash
+invited_by_user_id
+expires_at
+accepted_at
+created_at
+```
+
+## registration_tokens
+
+```sql
+id
+user_id
+token_hash
+type
+expires_at
+used_at
+created_at
+```
+
+## subscriptions
+
+```sql
+id
+business_id
+plan
+status
+trial_start
+trial_end
+created_at
+updated_at
+```
+
+## security_audit_logs
+
+```sql
+id
+business_id
+user_id
+event_type
+ip_address
+user_agent
+metadata
+created_at
+```
+
+---
+
+# API Endpoints
+
+## Owner Registration
+
+```txt
+POST /api/register/owner
+POST /api/register/verify-email
+POST /api/register/resend-verification
+```
+
+## Business Onboarding
+
+```txt
+POST /api/onboarding/business-details
+POST /api/onboarding/payment-details
+POST /api/onboarding/payroll-settings
+POST /api/onboarding/compliance-details
+GET  /api/onboarding/status
+```
+
+## Employee Invite Registration
+
+```txt
+POST /api/team/invite
+GET  /api/team/invite/:token
+POST /api/team/invite/accept
+POST /api/team/employee-profile
+```
+
+## Accountant Invite
+
+```txt
+POST /api/accountant/invite
+POST /api/accountant/invite/accept
+```
+
+## Customer Registration Later
+
+```txt
+POST /api/customer/register
+POST /api/customer/verify-email
+```
+
+---
+
+# Security Techniques
+
+Implement:
+
+* Argon2id password hashing
+* passkey registration option
+* email verification
+* hashed verification tokens
+* hashed invite tokens
+* token expiry
+* one-time-use invite links
+* rate limiting
+* CAPTCHA after suspicious attempts
+* input validation
+* ABN format validation
+* encrypted TFN storage
+* encrypted bank account storage
+* generic error messages
+* audit logs
+* tenant isolation
+* role assignment control
+
+---
+
+# Validation Rules
+
+## Business Validation
+
+```txt
+ABN must be 11 digits
+ACN required if business structure = company
+GST date required if GST registered = yes
+BSB must be 6 digits
+Default GST rate required
+BAS cycle required
+Accounting method required
+Business address required
+Insurance expiry required if insurance provider is entered
+```
+
+## Employee Validation
+
+```txt
+Email must match invite email
+TFN stored encrypted
+Bank details stored encrypted
+Hourly rate required for casual/part-time
+Salary required for full-time salary worker
+White Card required for trade roles where applicable
+Emergency contact required
+```
+
+---
+
+# Zero Trust Checks
+
+Every registration action checks:
+
+```txt
+Is the token valid?
+Is the token expired?
+Has the token already been used?
+Does invite belong to correct business_id?
+Is this role allowed?
+Is this user allowed to invite others?
+Does email match invited email?
+Are required details completed?
+```
+
+---
+
+# Implementation Phases
+
+## Phase 1 — Owner Registration
+
+Build:
+
+* owner signup
+* business creation
+* required business details
+* email verification
+* trial subscription creation
+
+## Phase 2 — Employee Invite Registration
+
+Build:
+
+* invite employee
+* accept invite
+* employee profile completion
+* role assignment
+
+## Phase 3 — Accountant Invite
+
+Build:
+
+* invite accountant
+* accountant limited access
+* tax/report permissions
+
+## Phase 4 — Customer Portal Registration
+
+Build later:
+
+* customer quote/invoice registration
+* customer limited dashboard
+
+## Phase 5 — Hardening
+
+Add:
+
+* CAPTCHA
+* passkey onboarding
+* suspicious registration blocking
+* audit review dashboard
+* encrypted sensitive fields
+* abuse detection
+
+---
+
+# Recommended Frontend Pages
+
+```txt
+/register/owner
+/verify-email
+/onboarding/business
+/onboarding/payment
+/onboarding/payroll
+/onboarding/compliance
+/invite/accept
+/employee/profile
+/accountant/invite/accept
+/customer/register
+```
+
+---
+
+# Recommended Components
+
+```txt
+OwnerRegisterForm.jsx
+BusinessDetailsForm.jsx
+TaxDetailsForm.jsx
+PaymentDetailsForm.jsx
+PayrollSettingsForm.jsx
+ComplianceDetailsForm.jsx
+EmailVerificationNotice.jsx
+InviteAcceptForm.jsx
+EmployeeProfileForm.jsx
+AccountantInviteForm.jsx
+PasswordStrengthMeter.jsx
+TermsCheckbox.jsx
+```
+
+---
+
+# Final Summary
+
+The **User Registration Module** will implement secure onboarding for owners, employees, accountants, and later customers.
+
+Build order:
+
+```txt
+Owner registration
+→ compulsory business/tax setup
+→ email verification
+→ trial subscription
+→ employee invite registration
+→ accountant invite
+→ customer portal later
+```

@@ -1,0 +1,620 @@
+# 10. Notification Preferences Module — Full & Final
+
+## Main Purpose
+
+The **Notification Preferences Module** controls **who receives notifications, through which channel, and when**.
+
+It supports:
+
+```txt
+job reminders
+worker assignments
+customer booking updates
+quote follow-ups
+invoice reminders
+payment alerts
+WorkSafe alerts
+payroll alerts
+security alerts
+subscription alerts
+```
+
+Core rule:
+
+```txt
+Business-wide notification rules are controlled by Owner.
+Employees can only manage their own personal notification preferences.
+```
+
+---
+
+# What We Will Implement
+
+## 1. Notification Channels
+
+Support:
+
+```txt
+Email
+SMS
+Push notification
+In-app notification
+```
+
+Later:
+
+```txt
+WhatsApp
+Telegram
+```
+
+---
+
+# 2. Notification Types
+
+## Job Notifications
+
+```txt
+job created
+job assigned
+job rescheduled
+job cancelled
+job reminder
+worker on the way
+job completed
+customer signature required
+```
+
+## Quote Notifications
+
+```txt
+quote created
+quote sent
+quote viewed
+quote accepted
+quote rejected
+quote expiring soon
+quote follow-up reminder
+```
+
+## Invoice & Payment Notifications
+
+```txt
+invoice created
+invoice sent
+invoice viewed
+invoice due soon
+invoice overdue
+payment received
+payment failed
+receipt sent
+```
+
+## WorkSafe Notifications
+
+```txt
+safety checklist required
+SWMS required
+incident submitted
+near miss submitted
+licence expiry
+insurance expiry
+PPE checklist reminder
+```
+
+## Payroll Notifications
+
+```txt
+timesheet submitted
+timesheet approval required
+payslip generated
+payroll processed
+superannuation reminder
+```
+
+## Security Notifications
+
+```txt
+new login
+suspicious login
+password changed
+password reset requested
+MFA disabled
+passkey added
+session revoked
+role changed
+```
+
+## Subscription Notifications
+
+```txt
+trial started
+trial ending
+trial expired
+payment failed
+subscription renewed
+subscription cancelled
+plan upgraded
+plan downgraded
+```
+
+---
+
+# 3. Recipient Rules
+
+Notification recipients:
+
+```txt
+Owner
+Assigned employee
+Customer
+Accountant later
+All employees
+Specific user
+```
+
+Examples:
+
+```txt
+Job assigned → assigned employee
+Invoice overdue → owner + customer
+Password changed → affected user
+Tax export completed → owner/accountant
+Incident report submitted → owner
+```
+
+---
+
+# 4. Preference Levels
+
+## Business-Level Preferences
+
+Controlled by Owner:
+
+```txt
+enable/disable notification type
+choose channels
+edit templates
+set reminder timing
+choose recipients
+```
+
+## User-Level Preferences
+
+Controlled by each user:
+
+```txt
+email on/off
+push on/off
+SMS on/off, if allowed
+quiet hours
+preferred language
+daily summary on/off
+```
+
+Employees cannot disable mandatory security or safety notifications.
+
+---
+
+# 5. Mandatory Notifications
+
+Some notifications cannot be disabled:
+
+```txt
+security alerts
+password reset
+MFA/passkey changes
+subscription payment failure
+critical WorkSafe incidents
+payslip generated
+```
+
+---
+
+# 6. Notification Timing
+
+Support timing rules:
+
+```txt
+send immediately
+send X minutes before job
+send X days before invoice due
+send X days after invoice overdue
+send daily summary
+send weekly summary
+```
+
+Examples:
+
+```txt
+Job reminder: 24 hours before + 1 hour before
+Invoice overdue: 1 day, 7 days, 14 days overdue
+Licence expiry: 30 days before
+Insurance expiry: 30 days before
+```
+
+---
+
+# 7. Templates
+
+Each notification has templates:
+
+```txt
+subject/title
+body
+SMS short message
+push message
+variables
+```
+
+Example variables:
+
+```txt
+{{customer_name}}
+{{business_name}}
+{{job_date}}
+{{job_time}}
+{{invoice_number}}
+{{amount_due}}
+{{quote_number}}
+{{employee_name}}
+```
+
+---
+
+# Database Tables
+
+## notification_preferences
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL
+event_key TEXT NOT NULL
+email_enabled BOOLEAN DEFAULT true
+sms_enabled BOOLEAN DEFAULT false
+push_enabled BOOLEAN DEFAULT true
+in_app_enabled BOOLEAN DEFAULT true
+mandatory BOOLEAN DEFAULT false
+recipient_rules JSONB
+timing_rules JSONB
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+## user_notification_preferences
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL
+user_id UUID NOT NULL
+email_enabled BOOLEAN DEFAULT true
+sms_enabled BOOLEAN DEFAULT false
+push_enabled BOOLEAN DEFAULT true
+in_app_enabled BOOLEAN DEFAULT true
+quiet_hours_enabled BOOLEAN DEFAULT false
+quiet_hours_start TIME
+quiet_hours_end TIME
+daily_summary_enabled BOOLEAN DEFAULT false
+weekly_summary_enabled BOOLEAN DEFAULT false
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+## notification_templates
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL
+event_key TEXT NOT NULL
+channel TEXT NOT NULL
+subject TEXT
+body TEXT NOT NULL
+variables JSONB
+is_default BOOLEAN DEFAULT false
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+## notifications
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL
+user_id UUID
+customer_id UUID
+event_key TEXT NOT NULL
+channel TEXT NOT NULL
+title TEXT
+message TEXT
+status TEXT NOT NULL
+sent_at TIMESTAMP
+read_at TIMESTAMP
+error_message TEXT
+metadata JSONB
+created_at TIMESTAMP NOT NULL
+```
+
+## notification_delivery_logs
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL
+notification_id UUID NOT NULL
+provider TEXT
+provider_message_id TEXT
+status TEXT
+error_code TEXT
+error_message TEXT
+created_at TIMESTAMP NOT NULL
+```
+
+---
+
+# API Endpoints
+
+```txt
+GET  /api/notifications/preferences
+PUT  /api/notifications/preferences/:event_key
+
+GET  /api/users/me/notification-preferences
+PUT  /api/users/me/notification-preferences
+
+GET  /api/notifications/templates
+PUT  /api/notifications/templates/:event_key/:channel
+
+GET  /api/notifications
+PATCH /api/notifications/:id/read
+PATCH /api/notifications/read-all
+
+POST /api/notifications/test
+```
+
+---
+
+# Access Control
+
+## Owner Can
+
+```txt
+manage business notification rules
+enable/disable channels
+edit templates
+set reminder timing
+choose recipient rules
+send test notifications
+view delivery logs
+```
+
+## Employee Can
+
+```txt
+manage own personal preferences
+view own in-app notifications
+mark own notifications as read
+```
+
+## Employee Cannot
+
+```txt
+edit business-wide templates
+disable mandatory notifications
+view other users’ notification logs
+change customer notification rules
+```
+
+---
+
+# Security Rules
+
+```txt
+Never expose provider API keys
+Do not send sensitive TFN/bank/payroll data in notifications
+Mask sensitive invoice/payment details where needed
+Mandatory security notifications cannot be disabled
+Tenant-check every notification
+Rate-limit test notifications
+Audit template changes
+```
+
+Do not include in SMS/email:
+
+```txt
+TFN
+bank account number
+full payroll details
+password reset token text
+private file storage URLs
+```
+
+Use secure links instead.
+
+---
+
+# Zero Trust Checks
+
+Every notification action checks:
+
+```txt
+Is user authenticated?
+Does user belong to current business_id?
+Is user Owner for business-wide settings?
+Is user editing only their own preferences?
+Is event mandatory?
+Is channel allowed by business plan?
+Is recipient allowed to receive this notification?
+```
+
+---
+
+# Notification Flow
+
+```txt
+System event occurs
+→ build event payload
+→ check business preference
+→ check user preference
+→ check mandatory rules
+→ choose channel
+→ load template
+→ render variables
+→ queue notification
+→ send via provider
+→ store delivery result
+→ show in-app notification
+```
+
+---
+
+# Providers
+
+Use:
+
+```txt
+Email: SMTP / SendGrid / Mailgun
+SMS: Twilio or Australian SMS provider
+Push: Firebase Cloud Messaging
+In-app: database + WebSocket later
+```
+
+---
+
+# Frontend Pages
+
+```txt
+/settings/notifications
+/settings/notification-templates
+/my-notifications
+/my-notification-preferences
+```
+
+---
+
+# Flutter Screens
+
+```txt
+NotificationSettingsScreen
+NotificationTemplateScreen
+MyNotificationsScreen
+MyNotificationPreferencesScreen
+```
+
+---
+
+# Go Backend Services
+
+```txt
+NotificationPreferenceService
+UserNotificationPreferenceService
+NotificationTemplateService
+NotificationQueueService
+NotificationDeliveryService
+NotificationAuditService
+```
+
+---
+
+# Default Notification Preferences
+
+Create defaults during business setup:
+
+```txt
+job_assigned: email + push
+job_reminder: email + push
+quote_accepted: email + in-app
+invoice_overdue: email
+payment_received: email + in-app
+incident_submitted: email + push
+password_changed: email mandatory
+suspicious_login: email mandatory
+trial_ending: email
+```
+
+---
+
+# Audit Events
+
+Log:
+
+```txt
+NOTIFICATION_PREFERENCES_UPDATED
+USER_NOTIFICATION_PREFERENCES_UPDATED
+NOTIFICATION_TEMPLATE_UPDATED
+TEST_NOTIFICATION_SENT
+MANDATORY_NOTIFICATION_ATTEMPTED_DISABLED
+NOTIFICATION_DELIVERY_FAILED
+```
+
+---
+
+# Implementation Phases
+
+## Phase 1 — In-App + Email Preferences
+
+Build:
+
+```txt
+business notification preferences
+user notification preferences
+default templates
+in-app notifications
+email sending
+```
+
+## Phase 2 — Reminder Engine
+
+Build:
+
+```txt
+job reminders
+invoice reminders
+licence/insurance expiry reminders
+scheduled notification queue
+```
+
+## Phase 3 — SMS + Push
+
+Build:
+
+```txt
+SMS provider
+Firebase push notifications
+channel selection
+delivery logs
+```
+
+## Phase 4 — Template Editor + Hardening
+
+Build:
+
+```txt
+template editor
+test notification
+mandatory notification enforcement
+audit logs
+rate limits
+```
+
+---
+
+# Final Summary
+
+The **Notification Preferences Module** will implement:
+
+```txt
+business-wide notification rules
+personal user preferences
+email/SMS/push/in-app channels
+notification templates
+mandatory alerts
+recipient rules
+reminder timing
+delivery logs
+audit logs
+secure notification handling
+```
+
+Final rule:
+
+```txt
+Notifications must be tenant-scoped, permission-controlled, privacy-safe, and never expose sensitive tax, payroll, bank, or authentication data.
+```

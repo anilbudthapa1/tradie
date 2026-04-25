@@ -1,0 +1,663 @@
+# 3. Login / Logout Module — Zero Trust Secure Design
+
+## Main Purpose
+
+The **Login / Logout Module** controls secure access to Tradie Job Manager after registration.
+
+Its purpose is to:
+
+```txt
+verify user identity
+validate device/session risk
+issue secure access tokens
+enforce role + business access
+terminate sessions safely
+record all login/logout activity
+```
+
+---
+
+# What We Will Implement
+
+## 1. Login Methods
+
+### Primary Login
+
+```txt
+Email + password
+```
+
+### Modern Login
+
+```txt
+Passkey / WebAuthn / FIDO2
+```
+
+### Admin/Owner Extra Protection
+
+```txt
+MFA required for Owner/Admin/Accountant
+```
+
+---
+
+# 2. Zero Trust Login Flow
+
+```txt
+User submits login
+→ validate input
+→ check account status
+→ verify password/passkey
+→ check email verification
+→ check MFA requirement
+→ evaluate device/session risk
+→ issue short-lived access token
+→ issue refresh token
+→ create session record
+→ write audit log
+→ allow dashboard access
+```
+
+---
+
+# 3. Login Security Checks
+
+Before login success, check:
+
+```txt
+Is email verified?
+Is account active?
+Is business account active?
+Is subscription/trial valid?
+Is user locked or suspended?
+Is password/passkey valid?
+Is MFA required?
+Is login coming from suspicious device/IP?
+```
+
+---
+
+# 4. Logout Flow
+
+```txt
+User clicks logout
+→ revoke current refresh token
+→ delete/clear auth cookies
+→ mark session as ended
+→ write audit log
+→ redirect to login page
+```
+
+Also support:
+
+```txt
+logout from current device
+logout from all devices
+admin force logout user
+```
+
+---
+
+# 5. Token Strategy
+
+Use:
+
+```txt
+short-lived access token
+refresh token rotation
+server-side session record
+```
+
+Recommended:
+
+| Token              | Storage                   | Lifetime             |
+| ------------------ | ------------------------- | -------------------- |
+| Access Token       | Memory or HttpOnly cookie | 10–15 min            |
+| Refresh Token      | HttpOnly Secure cookie    | 7–30 days            |
+| Refresh Token Hash | Database                  | Until expiry/revoked |
+
+Important:
+
+```txt
+Never store raw refresh tokens in database.
+Store only token_hash.
+```
+
+---
+
+# 6. Secure Cookie Settings
+
+Use:
+
+```txt
+HttpOnly = true
+Secure = true
+SameSite = Lax or Strict
+Path = /api/auth/refresh
+```
+
+For production:
+
+```txt
+HTTPS only
+no token in localStorage
+no token in URL
+```
+
+---
+
+# 7. Session Management
+
+Each login creates a session:
+
+```txt
+session_id
+user_id
+business_id
+refresh_token_hash
+device_name
+ip_address
+user_agent
+created_at
+last_used_at
+expires_at
+revoked_at
+```
+
+User can see:
+
+```txt
+active devices
+last login time
+browser/device
+approximate location
+```
+
+---
+
+# 8. Risk-Based Login
+
+Assign risk score using:
+
+```txt
+new device
+new country/location
+many failed attempts
+impossible travel
+TOR/VPN/proxy indicator
+unusual login time
+admin/owner role
+old password age
+```
+
+Actions:
+
+| Risk     | Action                         |
+| -------- | ------------------------------ |
+| Low      | Allow login                    |
+| Medium   | Require MFA                    |
+| High     | Block temporarily + send alert |
+| Critical | Lock account + admin review    |
+
+---
+
+# 9. Brute Force Protection
+
+Add:
+
+```txt
+rate limiting by IP
+rate limiting by email
+progressive delay
+temporary lockout
+CAPTCHA after repeated failures
+generic error messages
+```
+
+Use generic login response:
+
+```txt
+Invalid email or password.
+```
+
+Do not reveal:
+
+```txt
+email exists
+password wrong
+account suspended
+```
+
+---
+
+# 10. MFA Login Flow
+
+For Owner/Admin/Accountant:
+
+```txt
+password verified
+→ temporary login challenge created
+→ user enters MFA code
+→ verify MFA
+→ create session
+→ issue tokens
+```
+
+MFA options:
+
+```txt
+Authenticator app
+Passkey
+Backup codes
+Email OTP as backup
+SMS only fallback
+```
+
+---
+
+# 11. Passkey Login Flow
+
+```txt
+User enters email or chooses passkey
+→ server creates WebAuthn challenge
+→ browser signs challenge with private key
+→ server verifies public key
+→ check user + credential
+→ create session
+→ issue tokens
+```
+
+Passkey database stores:
+
+```txt
+credential_id
+public_key
+sign_count
+device_name
+last_used_at
+```
+
+---
+
+# 12. Logout Security
+
+On logout:
+
+```txt
+revoke refresh token
+clear cookies
+invalidate current session
+record audit event
+```
+
+On logout all devices:
+
+```txt
+revoke all active refresh tokens for user
+clear current cookie
+force re-login everywhere
+```
+
+On password change:
+
+```txt
+revoke all sessions except current
+```
+
+On role downgrade or suspension:
+
+```txt
+revoke all sessions immediately
+```
+
+---
+
+# Database Tables
+
+## login_sessions
+
+```sql
+id
+user_id
+business_id
+refresh_token_hash
+device_name
+ip_address
+user_agent
+risk_score
+mfa_verified
+expires_at
+last_used_at
+revoked_at
+created_at
+```
+
+## login_attempts
+
+```sql
+id
+email
+user_id
+business_id
+ip_address
+user_agent
+success
+failure_reason
+risk_score
+created_at
+```
+
+## mfa_challenges
+
+```sql
+id
+user_id
+challenge_hash
+challenge_type
+expires_at
+used_at
+created_at
+```
+
+## passkey_challenges
+
+```sql
+id
+user_id
+challenge_hash
+challenge_type
+expires_at
+used_at
+created_at
+```
+
+## security_audit_logs
+
+```sql
+id
+business_id
+user_id
+event_type
+ip_address
+user_agent
+metadata
+created_at
+```
+
+---
+
+# API Endpoints
+
+## Login
+
+```txt
+POST /api/auth/login
+POST /api/auth/login/mfa/verify
+POST /api/auth/passkey/login/options
+POST /api/auth/passkey/login/verify
+```
+
+## Token Refresh
+
+```txt
+POST /api/auth/refresh
+```
+
+## Logout
+
+```txt
+POST /api/auth/logout
+POST /api/auth/logout-all
+POST /api/auth/sessions/:id/revoke
+```
+
+## Sessions
+
+```txt
+GET /api/auth/sessions
+GET /api/auth/me
+```
+
+---
+
+# Backend Middleware
+
+Every protected request must pass:
+
+```txt
+authenticate token
+validate session
+check token expiry
+check user status
+check business status
+check role permission
+check tenant/business_id
+log sensitive actions
+```
+
+Middleware chain:
+
+```txt
+authMiddleware
+sessionMiddleware
+tenantMiddleware
+rbacMiddleware
+auditMiddleware
+```
+
+---
+
+# Frontend Pages
+
+```txt
+/login
+/passkey-login
+/mfa
+/sessions
+/security
+/logout
+```
+
+---
+
+# Frontend Components
+
+```txt
+LoginForm.jsx
+PasskeyLoginButton.jsx
+MfaVerifyForm.jsx
+LogoutButton.jsx
+ActiveSessionsList.jsx
+TrustedDeviceCard.jsx
+SecurityAlertBanner.jsx
+```
+
+---
+
+# Security Headers
+
+Use:
+
+```txt
+Content-Security-Policy
+Strict-Transport-Security
+X-Frame-Options
+X-Content-Type-Options
+Referrer-Policy
+Permissions-Policy
+```
+
+---
+
+# Logging Events
+
+Record:
+
+```txt
+LOGIN_SUCCESS
+LOGIN_FAILED
+MFA_REQUIRED
+MFA_SUCCESS
+MFA_FAILED
+PASSKEY_LOGIN_SUCCESS
+PASSKEY_LOGIN_FAILED
+TOKEN_REFRESHED
+LOGOUT_SUCCESS
+LOGOUT_ALL
+SESSION_REVOKED
+SUSPICIOUS_LOGIN
+ACCOUNT_LOCKED
+```
+
+---
+
+# Validation Rules
+
+Login request:
+
+```txt
+email required
+email format valid
+password required unless passkey
+request body size limited
+invalid fields rejected
+```
+
+MFA request:
+
+```txt
+challenge_id required
+code required
+challenge not expired
+challenge not used
+```
+
+Refresh request:
+
+```txt
+refresh cookie exists
+refresh token hash matches
+session not revoked
+session not expired
+user active
+business active
+```
+
+Logout request:
+
+```txt
+current session exists
+refresh token exists
+session belongs to logged-in user
+```
+
+---
+
+# Implementation Phases
+
+## Phase 1 — Secure Login/Logout
+
+Build:
+
+```txt
+email/password login
+Argon2id verification
+short JWT access token
+refresh token cookie
+logout current device
+basic audit logs
+```
+
+## Phase 2 — Session Control
+
+Add:
+
+```txt
+active sessions list
+logout all devices
+refresh token rotation
+session revocation
+```
+
+## Phase 3 — MFA
+
+Add:
+
+```txt
+MFA challenge
+TOTP verification
+backup codes
+mandatory MFA for Owner/Admin/Accountant
+```
+
+## Phase 4 — Passkey Login
+
+Add:
+
+```txt
+WebAuthn challenge
+passkey verification
+passkey login button
+credential management
+```
+
+## Phase 5 — Zero Trust Hardening
+
+Add:
+
+```txt
+risk scoring
+suspicious login alerts
+device trust
+CAPTCHA after failures
+geo/IP anomaly detection
+admin force logout
+```
+
+---
+
+# Recommended Techniques
+
+| Area                  | Technique               |
+| --------------------- | ----------------------- |
+| Password verification | Argon2id                |
+| Passwordless login    | WebAuthn/FIDO2          |
+| MFA                   | TOTP authenticator app  |
+| Access token          | JWT 10–15 min           |
+| Refresh token         | Random opaque token     |
+| Refresh storage       | Hash in DB              |
+| Browser storage       | HttpOnly Secure cookie  |
+| Session security      | Refresh rotation        |
+| Authorization         | RBAC + tenant check     |
+| Abuse control         | rate limiting + lockout |
+| Audit                 | immutable security logs |
+
+---
+
+# Final Summary
+
+The **Login / Logout Module** will implement:
+
+```txt
+secure login
+secure logout
+passkey login
+MFA challenge
+short-lived JWT
+refresh token rotation
+session revocation
+risk-based login
+Zero Trust middleware
+audit logging
+tenant-aware access checks
+```
+
+Build order:
+
+```txt
+basic login/logout
+→ refresh/session control
+→ MFA
+→ passkeys
+→ risk-based Zero Trust hardening
+```

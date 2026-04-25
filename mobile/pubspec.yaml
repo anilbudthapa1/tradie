@@ -1,0 +1,96 @@
+name: tradie_mobile
+description: Tradie Job Manager — Mobile App for owners and workers
+
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Navigation
+  go_router: ^14.0.0
+
+  # State management
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+
+  # Networking
+  dio: ^5.4.3
+  web_socket_channel: ^3.0.0
+
+  # Storage
+  flutter_secure_storage: ^9.0.0
+  shared_preferences: ^2.2.3
+
+  # UI
+  iconsax_flutter: ^1.0.0
+  cached_network_image: ^3.3.1
+  flutter_svg: ^2.0.10+1
+  shimmer: ^3.0.0
+  lottie: ^3.1.0
+  fl_chart: ^0.68.0
+  table_calendar: ^3.1.1
+  google_maps_flutter: ^2.6.1
+  signature: ^5.4.1
+
+  # Forms
+  reactive_forms: ^17.0.1
+
+  # Date/time
+  intl: ^0.19.0
+
+  # PDF & Files
+  open_file: ^3.3.2
+  file_picker: ^8.0.3
+  image_picker: ^1.1.1
+  path_provider: ^2.1.3
+
+  # Notifications
+  firebase_core: ^3.3.0
+  firebase_messaging: ^15.1.0
+  flutter_local_notifications: ^17.1.2
+
+  # Auth
+  local_auth: ^2.3.0
+  webview_flutter: ^4.8.0
+
+  # Maps
+  geolocator: ^12.0.0
+  geocoding: ^3.0.0
+
+  # URL
+  url_launcher: ^6.3.0
+
+  # Utils
+  uuid: ^4.4.0
+  equatable: ^2.0.5
+  logger: ^2.4.0
+  connectivity_plus: ^6.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  build_runner: ^2.4.11
+  riverpod_generator: ^2.4.0
+  flutter_lints: ^4.0.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/icons/
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700

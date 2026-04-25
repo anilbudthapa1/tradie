@@ -1,0 +1,6 @@
+Component	The "Speed" Choice	Why?
+Frontend	Flutter (Dart)	Compiles to native machine code; no laggy "bridge."
+Backend	Go	Handles thousands of requests with sub-millisecond lag.
+Database	ScyllaDB + Redis	Built for "p99" low-latency (predictable speed).
+Communication	gRPC	Binary data transfer is much faster than text-based JSON.
+		

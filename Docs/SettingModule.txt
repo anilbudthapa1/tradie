@@ -1,0 +1,844 @@
+# 9. Settings Module — Full & Final
+
+## Main Purpose
+
+The **Settings Module** controls how each business account behaves inside **Tradie Job Manager**.
+
+It stores business-level preferences for:
+
+```txt
+jobs
+quotes
+invoices
+tax
+payroll
+WorkSafe
+notifications
+security
+users
+files
+reports
+integrations
+```
+
+Core rule:
+
+```txt
+Settings are tenant-specific. Every setting belongs to one business_id.
+Only Owner can change sensitive settings.
+Employees can only change their own personal preferences.
+```
+
+---
+
+# What We Will Implement
+
+## 1. General Business Settings
+
+Controls default system behaviour.
+
+```txt
+timezone
+currency
+date format
+time format
+language
+country
+state/territory
+default dashboard view
+```
+
+Example:
+
+```txt
+timezone = Australia/Melbourne
+currency = AUD
+date_format = DD/MM/YYYY
+```
+
+---
+
+# 2. Job Settings
+
+Controls job workflow.
+
+```txt
+default job status
+job priority options
+service categories
+job cancellation reasons
+recurring job defaults
+job completion requirements
+required job photos yes/no
+customer signature required yes/no
+```
+
+Example statuses:
+
+```txt
+Pending
+Scheduled
+On The Way
+In Progress
+Completed
+Cancelled
+```
+
+---
+
+# 3. Scheduling Settings
+
+Controls calendar and booking rules.
+
+```txt
+business working days
+working hours
+public holiday handling
+minimum booking notice
+maximum jobs per worker per day
+travel time buffer
+auto-assign worker yes/no
+```
+
+Example:
+
+```txt
+Monday–Friday
+8:00 AM – 5:00 PM
+travel buffer = 20 minutes
+```
+
+---
+
+# 4. Quote Settings
+
+Controls quote generation.
+
+```txt
+quote prefix
+quote number sequence
+default quote expiry
+default quote terms
+default labour rate
+default material markup
+quote approval required yes/no
+customer online approval yes/no
+```
+
+---
+
+# 5. Invoice Settings
+
+Controls invoices.
+
+```txt
+invoice prefix
+invoice number sequence
+default payment terms
+late payment reminder days
+default invoice notes
+GST display option
+payment instructions
+```
+
+Example:
+
+```txt
+INV-0001
+Payment due in 7 days
+```
+
+---
+
+# 6. Tax & GST Settings
+
+Controls reports and tax calculations.
+
+```txt
+GST registered yes/no
+default GST rate
+BAS cycle
+accounting method
+financial year start/end
+tax report format
+expense categories
+```
+
+Expense categories:
+
+```txt
+Fuel
+Tools
+Materials
+Insurance
+Vehicle
+Phone
+Rent
+Subcontractor
+Software
+Other
+```
+
+---
+
+# 7. Payroll Settings
+
+Controls employee pay.
+
+```txt
+default pay cycle
+default super rate
+overtime rules
+weekend rate rules
+public holiday rate rules
+timesheet approval required
+payslip template
+```
+
+Pay cycles:
+
+```txt
+Weekly
+Fortnightly
+Monthly
+```
+
+---
+
+# 8. WorkSafe / Compliance Settings
+
+Controls safety workflows.
+
+```txt
+safety checklist required yes/no
+SWMS required before job start yes/no
+PPE checklist required yes/no
+incident report approval required
+licence expiry reminder days
+insurance expiry reminder days
+mandatory worker safety sign-off
+```
+
+---
+
+# 9. Notification Settings
+
+Controls email/SMS/push notifications.
+
+```txt
+booking confirmation
+job reminder
+worker assignment
+ETA message
+quote follow-up
+invoice reminder
+payment received
+overdue payment
+licence expiry
+insurance expiry
+trial ending
+security alert
+```
+
+Each notification can have:
+
+```txt
+enabled/disabled
+channel: email, SMS, push
+template
+send timing
+recipient role
+```
+
+---
+
+# 10. Security Settings
+
+Very important.
+
+```txt
+MFA required for Owner
+MFA required for employees
+passkey allowed
+session timeout
+logout all devices option
+allowed login methods
+password policy
+IP allowlist later
+failed login lockout
+security alert emails
+```
+
+Recommended defaults:
+
+```txt
+Owner MFA = required
+Employee MFA = optional
+session timeout = 30 minutes inactive
+password minimum = 12 characters
+passkey = enabled
+```
+
+---
+
+# 11. File & Storage Settings
+
+Controls uploaded files.
+
+```txt
+allowed file types
+maximum file size
+photo compression
+receipt upload rules
+invoice PDF storage
+payslip PDF storage
+document retention period
+```
+
+Allowed examples:
+
+```txt
+PDF
+JPG
+PNG
+DOCX
+CSV
+```
+
+---
+
+# 12. Report Settings
+
+Controls generated reports.
+
+```txt
+default report period
+PDF template
+CSV export format
+include logo yes/no
+include ABN yes/no
+include GST summary yes/no
+accountant export format
+```
+
+---
+
+# 13. Integration Settings
+
+Controls external services.
+
+```txt
+Stripe
+Xero
+MYOB
+QuickBooks
+Google Calendar
+Google Maps
+SMS provider
+Email provider
+S3 storage
+```
+
+Each integration should store:
+
+```txt
+enabled
+provider
+connection status
+last synced at
+created by
+```
+
+Secrets/API keys must not be exposed in frontend.
+
+---
+
+# 14. Employee Personal Settings
+
+Employees can update only their own preferences:
+
+```txt
+notification preferences
+preferred language
+profile photo
+calendar view
+dark/light mode
+passkey setup
+MFA setup
+```
+
+Employees cannot change:
+
+```txt
+business tax settings
+invoice settings
+payroll rules
+subscription settings
+security policy
+```
+
+---
+
+# Database Tables
+
+## business_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+timezone TEXT NOT NULL DEFAULT 'Australia/Melbourne'
+currency TEXT NOT NULL DEFAULT 'AUD'
+date_format TEXT NOT NULL DEFAULT 'DD/MM/YYYY'
+time_format TEXT NOT NULL DEFAULT '12h'
+language TEXT NOT NULL DEFAULT 'en'
+country TEXT NOT NULL DEFAULT 'Australia'
+state TEXT
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## job_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+default_job_status TEXT NOT NULL
+require_completion_photo BOOLEAN NOT NULL DEFAULT false
+require_customer_signature BOOLEAN NOT NULL DEFAULT false
+allow_recurring_jobs BOOLEAN NOT NULL DEFAULT true
+auto_assign_worker BOOLEAN NOT NULL DEFAULT false
+service_categories JSONB
+job_priority_options JSONB
+cancellation_reasons JSONB
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## scheduling_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+working_days JSONB NOT NULL
+working_hours JSONB NOT NULL
+travel_time_buffer_minutes INTEGER DEFAULT 20
+minimum_booking_notice_hours INTEGER DEFAULT 2
+max_jobs_per_worker_per_day INTEGER
+public_holiday_booking_allowed BOOLEAN DEFAULT false
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## notification_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+event_key TEXT NOT NULL
+email_enabled BOOLEAN DEFAULT true
+sms_enabled BOOLEAN DEFAULT false
+push_enabled BOOLEAN DEFAULT true
+template_subject TEXT
+template_body TEXT
+send_before_minutes INTEGER
+recipient_roles JSONB
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## security_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+owner_mfa_required BOOLEAN DEFAULT true
+employee_mfa_required BOOLEAN DEFAULT false
+passkey_enabled BOOLEAN DEFAULT true
+session_timeout_minutes INTEGER DEFAULT 30
+password_min_length INTEGER DEFAULT 12
+failed_login_lockout_enabled BOOLEAN DEFAULT true
+failed_login_limit INTEGER DEFAULT 5
+lockout_minutes INTEGER DEFAULT 15
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## file_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+allowed_file_types JSONB
+max_file_size_mb INTEGER DEFAULT 10
+photo_compression_enabled BOOLEAN DEFAULT true
+retention_period_years INTEGER DEFAULT 7
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## user_preferences
+
+```sql
+id UUID PRIMARY KEY
+user_id UUID NOT NULL REFERENCES users(id)
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+theme TEXT DEFAULT 'system'
+language TEXT DEFAULT 'en'
+default_dashboard TEXT
+notification_preferences JSONB
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+# API Endpoints
+
+```txt
+GET  /api/settings
+PUT  /api/settings/general
+
+GET  /api/settings/jobs
+PUT  /api/settings/jobs
+
+GET  /api/settings/scheduling
+PUT  /api/settings/scheduling
+
+GET  /api/settings/notifications
+PUT  /api/settings/notifications
+
+GET  /api/settings/security
+PUT  /api/settings/security
+
+GET  /api/settings/files
+PUT  /api/settings/files
+
+GET  /api/settings/reports
+PUT  /api/settings/reports
+
+GET  /api/settings/integrations
+PUT  /api/settings/integrations
+
+GET  /api/users/me/preferences
+PUT  /api/users/me/preferences
+```
+
+---
+
+# Access Control
+
+## Owner Can Change
+
+```txt
+general settings
+job settings
+scheduling settings
+quote settings
+invoice settings
+tax settings
+payroll settings
+WorkSafe settings
+notification templates
+security settings
+file settings
+integration settings
+report settings
+```
+
+## Employee Can Change
+
+```txt
+own notification preferences
+own theme
+own language
+own MFA/passkey settings
+own dashboard view
+```
+
+## Employee Cannot Change
+
+```txt
+business-wide settings
+tax settings
+payroll rules
+security policy
+billing settings
+invoice numbering
+integration keys
+```
+
+---
+
+# Security Techniques
+
+Implement:
+
+```txt
+tenant isolation with business_id
+Owner-only sensitive settings
+PostgreSQL RLS
+audit logs for every settings update
+field validation
+default secure settings
+secrets stored in secret manager
+integration tokens encrypted
+deny by default
+```
+
+Never expose:
+
+```txt
+raw API keys
+encrypted secret values
+another business settings
+internal storage paths
+```
+
+---
+
+# Zero Trust Rules
+
+Every settings request must check:
+
+```txt
+Is user authenticated?
+Does user belong to this business_id?
+Is user Owner for business-wide settings?
+Is employee only editing own preferences?
+Is subscription active/trialing?
+Is this setting allowed under current plan?
+Should the action be audited?
+```
+
+---
+
+# Audit Events
+
+Log:
+
+```txt
+GENERAL_SETTINGS_UPDATED
+JOB_SETTINGS_UPDATED
+SCHEDULING_SETTINGS_UPDATED
+QUOTE_SETTINGS_UPDATED
+INVOICE_SETTINGS_UPDATED
+TAX_SETTINGS_UPDATED
+PAYROLL_SETTINGS_UPDATED
+WORKSAFE_SETTINGS_UPDATED
+NOTIFICATION_SETTINGS_UPDATED
+SECURITY_SETTINGS_UPDATED
+FILE_SETTINGS_UPDATED
+REPORT_SETTINGS_UPDATED
+INTEGRATION_SETTINGS_UPDATED
+USER_PREFERENCES_UPDATED
+```
+
+Sensitive setting changes should trigger security notifications:
+
+```txt
+MFA disabled
+passkey disabled
+session timeout changed
+integration connected/disconnected
+bank/payment setting changed
+payroll setting changed
+```
+
+---
+
+# Frontend Pages
+
+```txt
+/settings/general
+/settings/jobs
+/settings/scheduling
+/settings/quotes
+/settings/invoices
+/settings/tax
+/settings/payroll
+/settings/worksafe
+/settings/notifications
+/settings/security
+/settings/files
+/settings/reports
+/settings/integrations
+/settings/my-preferences
+```
+
+---
+
+# Flutter Screens
+
+```txt
+GeneralSettingsScreen
+JobSettingsScreen
+SchedulingSettingsScreen
+QuoteSettingsScreen
+InvoiceSettingsScreen
+TaxSettingsScreen
+PayrollSettingsScreen
+WorkSafeSettingsScreen
+NotificationSettingsScreen
+SecuritySettingsScreen
+FileSettingsScreen
+ReportSettingsScreen
+IntegrationSettingsScreen
+MyPreferencesScreen
+```
+
+---
+
+# Go Backend Services
+
+```txt
+SettingsService
+JobSettingsService
+SchedulingSettingsService
+NotificationSettingsService
+SecuritySettingsService
+FileSettingsService
+ReportSettingsService
+IntegrationSettingsService
+UserPreferenceService
+SettingsAuditService
+```
+
+---
+
+# Default Settings Created During Registration
+
+When a business is created, automatically create defaults:
+
+```txt
+timezone = Australia/Melbourne
+currency = AUD
+GST rate = 10 if GST registered, else 0
+invoice prefix = INV
+quote prefix = QTE
+payment terms = 7 days
+session timeout = 30 minutes
+owner MFA required = true
+passkey enabled = true
+allowed files = PDF,JPG,PNG,DOCX,CSV
+max file size = 10 MB
+```
+
+---
+
+# Implementation Phases
+
+## Phase 1 — Core Settings
+
+Build:
+
+```txt
+general settings
+job settings
+scheduling settings
+user preferences
+tenant isolation
+Owner-only access
+```
+
+## Phase 2 — Financial Settings
+
+Build:
+
+```txt
+quote settings
+invoice settings
+tax settings
+payroll settings
+```
+
+## Phase 3 — Security + Notification Settings
+
+Build:
+
+```txt
+security policy settings
+notification templates
+SMS/email/push preferences
+security alerts
+```
+
+## Phase 4 — Compliance + Files + Reports
+
+Build:
+
+```txt
+WorkSafe settings
+file upload rules
+report/export settings
+document retention
+```
+
+## Phase 5 — Integrations
+
+Build:
+
+```txt
+Stripe settings
+Google Maps settings
+email provider
+SMS provider
+Xero/MYOB/QuickBooks later
+```
+
+---
+
+# Final Summary
+
+The **Settings Module** will implement:
+
+```txt
+general business preferences
+job workflow settings
+scheduling settings
+quote/invoice settings
+tax/GST settings
+payroll settings
+WorkSafe settings
+notification settings
+security settings
+file/storage settings
+report settings
+integration settings
+employee personal preferences
+tenant isolation
+Owner-only sensitive updates
+audit logging
+secure defaults
+```
+
+Final rule:
+
+```txt
+Settings Module controls how the business operates, but every setting must be tenant-scoped, permission-protected, validated, audited, and secure by default.
+```

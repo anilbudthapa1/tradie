@@ -1,0 +1,946 @@
+# 8. Business Profile Module — Full & Final
+
+## Main Purpose
+
+The **Business Profile Module** stores the official business identity, tax details, invoice details, payroll settings, compliance information, and contact data for each tradie business.
+
+It supports:
+
+```txt
+tax reports
+BAS/GST reports
+invoices
+quotes
+payslips
+WorkSafe records
+accountant exports
+customer-facing documents
+subscription/business verification
+```
+
+Core rule:
+
+```txt
+Each business profile belongs to exactly one business_id.
+Only Owner can create/update business profile details.
+Employees can view limited business information only if needed.
+```
+
+---
+
+# What We Will Implement
+
+## 1. Legal Business Details
+
+Required fields:
+
+```txt
+Legal business name
+Trading name
+ABN
+ACN, if company
+Business structure
+Industry / trade type
+Business status
+Registered date
+```
+
+Business structure options:
+
+```txt
+Sole trader
+Partnership
+Company
+Trust
+Other
+```
+
+Trade type examples:
+
+```txt
+Plumbing
+Electrical
+Cleaning
+HVAC
+Landscaping
+Carpentry
+Painting
+Roofing
+Handyman
+Pest control
+Other
+```
+
+---
+
+## 2. Business Contact Details
+
+Required:
+
+```txt
+Business email
+Business phone
+Website, optional
+Primary contact person
+Support/contact email
+```
+
+---
+
+## 3. Business Address Details
+
+Required:
+
+```txt
+Registered business address
+Trading/service address
+Postal address
+Suburb
+State/territory
+Postcode
+Country
+```
+
+Support multiple addresses later:
+
+```txt
+Head office
+Warehouse
+Branch
+Service depot
+```
+
+---
+
+## 4. Tax & GST Settings
+
+Required:
+
+```txt
+GST registered: yes/no
+GST registration date, if registered
+Default GST rate
+BAS reporting cycle
+Accounting method
+Financial year start date
+Financial year end date
+```
+
+BAS cycle options:
+
+```txt
+Monthly
+Quarterly
+Annually
+Not registered
+```
+
+Accounting method:
+
+```txt
+Cash
+Accrual
+```
+
+Default GST:
+
+```txt
+10% for Australia
+0% if not GST registered
+```
+
+---
+
+## 5. Invoice & Quote Settings
+
+Required:
+
+```txt
+Invoice prefix
+Quote prefix
+Next invoice number
+Next quote number
+Default payment terms
+Default invoice notes
+Default quote terms
+Business logo
+```
+
+Example:
+
+```txt
+Invoice prefix: INV
+Next invoice number: 0001
+Quote prefix: QTE
+Default payment terms: 7 days
+```
+
+Invoice numbering must be tenant-scoped:
+
+```sql
+UNIQUE (business_id, invoice_number)
+```
+
+---
+
+## 6. Bank & Payment Details
+
+Required for invoices:
+
+```txt
+Bank account name
+BSB
+Account number
+Payment reference format
+Accepted payment methods
+```
+
+Accepted payment methods:
+
+```txt
+Bank transfer
+Card payment
+Cash
+Stripe payment link
+Other
+```
+
+Sensitive fields:
+
+```txt
+account_number must be encrypted
+```
+
+---
+
+## 7. Payroll Business Settings
+
+Required if payroll module is enabled:
+
+```txt
+PAYG withholding status
+Default pay cycle
+Default superannuation rate
+Payroll contact name
+Payroll contact email
+Employer payroll address
+```
+
+Pay cycle options:
+
+```txt
+Weekly
+Fortnightly
+Monthly
+```
+
+---
+
+## 8. WorkSafe / Compliance Details
+
+Required where applicable:
+
+```txt
+WorkSafe/state authority registration number
+Public liability insurance provider
+Insurance policy number
+Insurance expiry date
+Trade licence number, if business-level licence
+Licence expiry date
+Safety policy document
+SWMS templates
+```
+
+State-aware WorkSafe authority:
+
+```txt
+VIC: WorkSafe Victoria
+NSW: SafeWork NSW
+QLD: WorkSafe Queensland
+SA: SafeWork SA
+WA: WorkSafe WA
+TAS: WorkSafe Tasmania
+ACT: WorkSafe ACT
+NT: NT WorkSafe
+```
+
+---
+
+## 9. Branding Settings
+
+Used for customer-facing documents.
+
+```txt
+Business logo
+Brand colour
+Invoice footer text
+Quote footer text
+Email signature
+Customer portal display name
+```
+
+---
+
+## 10. Accountant / Tax Agent Details
+
+Optional but useful:
+
+```txt
+Accountant name
+Accountant business name
+Accountant email
+Accountant phone
+Tax agent number, if provided
+```
+
+Used for:
+
+```txt
+tax report export
+BAS/GST summary export
+year-end report
+accountant access invitation
+```
+
+---
+
+# Access Control
+
+## Owner
+
+Can:
+
+```txt
+view full business profile
+create/update business profile
+update tax settings
+update bank details
+update payroll settings
+update compliance details
+upload logo/documents
+export business profile
+```
+
+## Employee
+
+Can view only limited business information:
+
+```txt
+business trading name
+business phone
+business email
+service address
+safety policy documents assigned to them
+```
+
+Employee cannot view:
+
+```txt
+bank account details
+tax settings
+payroll settings
+ABN-sensitive reports
+accountant details
+subscription data
+```
+
+---
+
+# Database Tables
+
+## business_profiles
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+legal_business_name TEXT NOT NULL
+trading_name TEXT NOT NULL
+abn VARCHAR(11) NOT NULL
+acn VARCHAR(9)
+business_structure TEXT NOT NULL
+industry_type TEXT NOT NULL
+registered_date DATE
+status TEXT NOT NULL DEFAULT 'active'
+
+business_email TEXT NOT NULL
+business_phone TEXT NOT NULL
+website TEXT
+primary_contact_name TEXT
+support_email TEXT
+
+registered_address TEXT NOT NULL
+service_address TEXT NOT NULL
+postal_address TEXT NOT NULL
+suburb TEXT NOT NULL
+state TEXT NOT NULL
+postcode TEXT NOT NULL
+country TEXT NOT NULL DEFAULT 'Australia'
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+deleted_at TIMESTAMP
+```
+
+---
+
+## business_tax_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+gst_registered BOOLEAN NOT NULL
+gst_registration_date DATE
+default_gst_rate NUMERIC(5,2) NOT NULL
+bas_cycle TEXT NOT NULL
+accounting_method TEXT NOT NULL
+financial_year_start DATE NOT NULL
+financial_year_end DATE NOT NULL
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## business_invoice_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+invoice_prefix TEXT NOT NULL
+quote_prefix TEXT NOT NULL
+next_invoice_number INTEGER NOT NULL DEFAULT 1
+next_quote_number INTEGER NOT NULL DEFAULT 1
+default_payment_terms TEXT NOT NULL
+default_invoice_notes TEXT
+default_quote_terms TEXT
+logo_file_id UUID
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## business_payment_details
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+bank_account_name TEXT NOT NULL
+bsb VARCHAR(6) NOT NULL
+account_number_encrypted TEXT NOT NULL
+payment_reference_format TEXT
+accepted_payment_methods JSONB
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## business_payroll_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+payg_withholding_status TEXT NOT NULL
+default_pay_cycle TEXT NOT NULL
+default_super_rate NUMERIC(5,2) NOT NULL
+payroll_contact_name TEXT NOT NULL
+payroll_contact_email TEXT NOT NULL
+payroll_address TEXT
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## business_compliance_details
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+worksafe_registration_number TEXT
+insurance_provider TEXT
+insurance_policy_number TEXT
+insurance_expiry_date DATE
+business_trade_licence_number TEXT
+business_trade_licence_expiry DATE
+safety_policy_file_id UUID
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## business_branding_settings
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+brand_colour TEXT
+email_signature TEXT
+invoice_footer_text TEXT
+quote_footer_text TEXT
+customer_portal_display_name TEXT
+logo_file_id UUID
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+## business_accountant_details
+
+```sql
+id UUID PRIMARY KEY
+business_id UUID NOT NULL REFERENCES businesses(id)
+
+accountant_name TEXT
+accountant_business_name TEXT
+accountant_email TEXT
+accountant_phone TEXT
+tax_agent_number TEXT
+
+created_at TIMESTAMP NOT NULL
+updated_at TIMESTAMP NOT NULL
+```
+
+---
+
+# API Endpoints
+
+## Business Profile
+
+```txt
+GET    /api/business/profile
+PUT    /api/business/profile
+PATCH  /api/business/profile
+```
+
+## Tax Settings
+
+```txt
+GET    /api/business/tax-settings
+PUT    /api/business/tax-settings
+```
+
+## Invoice / Quote Settings
+
+```txt
+GET    /api/business/invoice-settings
+PUT    /api/business/invoice-settings
+```
+
+## Payment Details
+
+```txt
+GET    /api/business/payment-details
+PUT    /api/business/payment-details
+```
+
+## Payroll Settings
+
+```txt
+GET    /api/business/payroll-settings
+PUT    /api/business/payroll-settings
+```
+
+## Compliance Details
+
+```txt
+GET    /api/business/compliance
+PUT    /api/business/compliance
+```
+
+## Branding
+
+```txt
+GET    /api/business/branding
+PUT    /api/business/branding
+POST   /api/business/logo
+DELETE /api/business/logo
+```
+
+## Accountant
+
+```txt
+GET    /api/business/accountant
+PUT    /api/business/accountant
+```
+
+## Completion Status
+
+```txt
+GET /api/business/profile-completion
+```
+
+---
+
+# Validation Rules
+
+## Business Identity
+
+```txt
+Legal business name required
+Trading name required
+ABN required
+ABN must be 11 digits
+ACN required if business_structure = Company
+ACN must be 9 digits if provided
+Business structure required
+Industry type required
+```
+
+## Contact
+
+```txt
+Business email required and valid
+Business phone required
+Support email valid if provided
+Website valid if provided
+```
+
+## Address
+
+```txt
+Registered address required
+Service address required
+Postal address required
+State required
+Postcode required
+Country required
+```
+
+## Tax
+
+```txt
+GST registered required
+GST registration date required if GST registered = true
+Default GST rate required
+If GST registered = true, default GST rate usually 10
+If GST registered = false, default GST rate should be 0
+BAS cycle required
+Accounting method required
+Financial year dates required
+```
+
+## Payment
+
+```txt
+Bank account name required
+BSB must be 6 digits
+Account number required and encrypted
+Payment terms required
+```
+
+## Payroll
+
+```txt
+PAYG withholding status required
+Default pay cycle required
+Default super rate required
+Payroll contact required
+```
+
+## Compliance
+
+```txt
+Insurance provider required
+Policy number required
+Insurance expiry date required
+Licence expiry required if licence number provided
+```
+
+---
+
+# Security Techniques
+
+Implement:
+
+```txt
+Owner-only update access
+tenant isolation using business_id
+PostgreSQL RLS
+field-level encryption for bank details
+signed URLs for logo/compliance documents
+input validation
+audit logs for all profile updates
+soft delete
+rate limiting on update endpoints
+```
+
+Never expose:
+
+```txt
+raw bank account encryption values
+another business profile
+internal storage paths
+deleted records by default
+```
+
+---
+
+# Zero Trust Rules
+
+Every request must check:
+
+```txt
+Is user authenticated?
+Is user part of this business_id?
+Is user Owner for sensitive updates?
+Is subscription active/trialing?
+Does requested profile belong to current_user.business_id?
+Is the field allowed for this role?
+Should this action be audited?
+```
+
+---
+
+# Audit Events
+
+Log:
+
+```txt
+BUSINESS_PROFILE_VIEWED
+BUSINESS_PROFILE_UPDATED
+BUSINESS_TAX_SETTINGS_UPDATED
+BUSINESS_PAYMENT_DETAILS_UPDATED
+BUSINESS_PAYROLL_SETTINGS_UPDATED
+BUSINESS_COMPLIANCE_UPDATED
+BUSINESS_BRANDING_UPDATED
+BUSINESS_LOGO_UPLOADED
+BUSINESS_LOGO_DELETED
+ACCOUNTANT_DETAILS_UPDATED
+BUSINESS_PROFILE_EXPORTED
+```
+
+For sensitive updates, store:
+
+```txt
+old_value
+new_value
+updated_by
+ip_address
+user_agent
+timestamp
+```
+
+Mask sensitive fields in logs:
+
+```txt
+bank account number
+```
+
+---
+
+# Frontend Pages
+
+```txt
+/business/profile
+/business/tax-settings
+/business/invoice-settings
+/business/payment-details
+/business/payroll-settings
+/business/compliance
+/business/branding
+/business/accountant
+/business/profile-completion
+```
+
+---
+
+# Frontend Components
+
+```txt
+BusinessProfileForm
+BusinessTaxSettingsForm
+BusinessInvoiceSettingsForm
+BusinessPaymentDetailsForm
+BusinessPayrollSettingsForm
+BusinessComplianceForm
+BusinessBrandingForm
+BusinessLogoUploader
+AccountantDetailsForm
+ProfileCompletionCard
+SensitiveFieldWarning
+```
+
+---
+
+# Flutter Screens
+
+```txt
+BusinessProfileScreen
+TaxSettingsScreen
+InvoiceSettingsScreen
+PaymentDetailsScreen
+PayrollSettingsScreen
+ComplianceDetailsScreen
+BrandingSettingsScreen
+AccountantDetailsScreen
+ProfileCompletionScreen
+```
+
+---
+
+# Go Backend Services
+
+```txt
+BusinessProfileService
+BusinessTaxSettingsService
+BusinessInvoiceSettingsService
+BusinessPaymentDetailsService
+BusinessPayrollSettingsService
+BusinessComplianceService
+BusinessBrandingService
+BusinessAccountantService
+BusinessProfileValidationService
+BusinessProfileAuditService
+```
+
+---
+
+# Business Profile Completion Logic
+
+The business account is not fully active until required sections are complete.
+
+Required completion checklist:
+
+```txt
+legal profile completed
+contact details completed
+address completed
+tax settings completed
+invoice settings completed
+payment details completed
+payroll settings completed, if payroll enabled
+compliance details completed
+terms/privacy accepted
+email verified
+```
+
+Example response:
+
+```json
+{
+  "profile_complete": false,
+  "missing_sections": [
+    "tax_settings",
+    "payment_details",
+    "compliance_details"
+  ]
+}
+```
+
+---
+
+# Implementation Phases
+
+## Phase 1 — Core Business Profile
+
+Build:
+
+```txt
+business profile table
+legal business fields
+contact fields
+address fields
+owner-only update
+tenant isolation
+completion status
+```
+
+## Phase 2 — Tax + Invoice Settings
+
+Build:
+
+```txt
+GST/BAS settings
+financial year settings
+invoice prefix
+quote prefix
+invoice number sequence
+quote number sequence
+```
+
+## Phase 3 — Payment + Payroll Settings
+
+Build:
+
+```txt
+bank details with encryption
+payment terms
+PAYG settings
+super rate
+pay cycle
+payroll contact
+```
+
+## Phase 4 — Compliance + Branding
+
+Build:
+
+```txt
+insurance details
+WorkSafe registration
+licence details
+logo upload
+invoice/quote branding
+email signature
+```
+
+## Phase 5 — Accountant + Hardening
+
+Build:
+
+```txt
+accountant details
+profile export
+audit review
+field-level masking
+RLS policies
+signed document access
+```
+
+---
+
+# Final Summary
+
+The **Business Profile Module** will implement:
+
+```txt
+legal business identity
+ABN/ACN details
+business contact information
+business addresses
+GST/BAS/tax settings
+invoice and quote settings
+bank/payment details
+payroll settings
+WorkSafe/compliance details
+branding settings
+accountant details
+profile completion enforcement
+owner-only sensitive updates
+tenant isolation
+field-level encryption
+audit logging
+```
+
+Final rule:
+
+```txt
+Business Profile is the legal and financial source of truth for every invoice, quote, payroll record, tax report, WorkSafe report, and customer-facing document in Tradie Job Manager.
+```

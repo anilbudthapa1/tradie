@@ -1,0 +1,7 @@
+DROP TABLE IF EXISTS expenses CASCADE;
+DROP TABLE IF EXISTS ppe_submissions CASCADE;
+DROP TABLE IF EXISTS compliance_records CASCADE;
+DROP TABLE IF EXISTS risk_assessments CASCADE;
+DROP TABLE IF EXISTS incident_reports CASCADE;
+DROP TABLE IF EXISTS swms_documents CASCADE;
+DROP TABLE IF EXISTS safety_checklists CASCADE;

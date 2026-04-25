@@ -1,0 +1,281 @@
+Below is the full Authentication Module plan for Tradie Job Manager.
+Module Purpose
+To verify user identity, protect business data, and ensure every user only accesses the correct company, role, and feature.
+This module will protect:
+•	customer records
+•	jobs
+•	invoices
+•	tax reports
+•	payslips
+•	WorkSafe records
+•	worker data
+We will make it Zero Trust aligned, not “vulnerability-proof.” No app is 100% vulnerability-proof, but we can make it strongly attack-resistant using OWASP/NIST guidance. OWASP ASVS 5.0 is the current application security verification standard, and NIST SP 800-63-4 covers modern digital identity and authentication guidance. (OWASP)
+________________________________________
+What We Will Implement
+1. Email + Password Login
+Used as the basic login method.
+Technique:
+•	store password using Argon2id
+•	never store plain password
+•	enforce strong password rules
+•	login rate limiting
+•	failed login tracking
+2. Passkey Login
+This is the modern feature.
+Technique:
+•	use WebAuthn / FIDO2
+•	user logs in with fingerprint, face unlock, device PIN, or hardware key
+•	server stores public key only
+•	private key stays on user device
+Passkeys are phishing-resistant because there is no reusable password secret for attackers to steal. (WIRED)
+3. Multi-Factor Authentication
+For Owner/Admin accounts.
+Technique:
+•	authenticator app OTP
+•	email OTP as backup
+•	SMS only as fallback, not primary
+4. JWT + Refresh Token Session
+Technique:
+•	short-lived access token: 10–15 minutes
+•	refresh token rotation
+•	refresh token stored as hash in database
+•	secure HttpOnly cookie
+•	revoke tokens on logout
+OWASP recommends strong session management because session tokens bind authentication to the user’s web activity and access control. (OWASP Cheat Sheet Series)
+5. Zero Trust Request Checks
+Every protected API request checks:
+Is user authenticated?
+Is session valid?
+Is device/session trusted?
+Does user belong to this business_id?
+Does user have permission?
+Is the requested action allowed?
+6. Tenant Isolation
+Very important for SaaS.
+Every database query must include:
+WHERE business_id = logged_in_user.business_id
+This prevents one tradie business from seeing another company’s customers, invoices, payslips, or jobs.
+7. Role-Based Access Control
+Roles:
+Role	Access
+Owner	Full access
+Admin	Manage jobs, workers, quotes, invoices
+Worker	Assigned jobs, job notes, check-in/out
+Accountant	Tax, bills, invoices, reports
+Customer	View own quotes/invoices only
+8. Secure Password Reset
+Flow:
+Forgot password
+→ send reset link
+→ token expires quickly
+→ token stored as hash
+→ user sets new password
+→ old sessions revoked
+9. Device & Session Management
+Users can view:
+•	active devices
+•	login time
+•	IP/location approximation
+•	browser/device name
+They can revoke unknown sessions.
+10. Audit Logging
+Record:
+•	successful login
+•	failed login
+•	logout
+•	password change
+•	passkey added/removed
+•	MFA enabled/disabled
+•	role changed
+•	suspicious login attempt
+________________________________________
+Database Tables
+users
+id
+business_id
+full_name
+email
+password_hash
+role
+status
+mfa_enabled
+last_login_at
+created_at
+updated_at
+businesses
+id
+business_name
+abn
+email
+phone
+plan
+status
+created_at
+updated_at
+refresh_tokens
+id
+user_id
+token_hash
+device_name
+ip_address
+user_agent
+expires_at
+revoked_at
+created_at
+passkeys
+id
+user_id
+credential_id
+public_key
+sign_count
+device_name
+created_at
+last_used_at
+mfa_secrets
+id
+user_id
+secret_hash
+backup_codes_hash
+enabled_at
+created_at
+password_reset_tokens
+id
+user_id
+token_hash
+expires_at
+used_at
+created_at
+security_audit_logs
+id
+business_id
+user_id
+event_type
+ip_address
+user_agent
+metadata
+created_at
+________________________________________
+API Endpoints
+Auth
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/logout
+POST /api/auth/refresh
+POST /api/auth/forgot-password
+POST /api/auth/reset-password
+POST /api/auth/change-password
+Passkeys
+POST /api/auth/passkey/register/options
+POST /api/auth/passkey/register/verify
+POST /api/auth/passkey/login/options
+POST /api/auth/passkey/login/verify
+DELETE /api/auth/passkey/:id
+MFA
+POST /api/auth/mfa/setup
+POST /api/auth/mfa/verify
+POST /api/auth/mfa/disable
+POST /api/auth/mfa/recovery-code
+Sessions
+GET /api/auth/sessions
+DELETE /api/auth/sessions/:id
+DELETE /api/auth/sessions/all
+________________________________________
+Security Techniques
+Password Security
+Use:
+Argon2id
+minimum 12 characters
+breached-password check later
+rate limiting
+account lockout after repeated failed attempts
+Token Security
+Use:
+short-lived JWT
+refresh token rotation
+token hashing
+HttpOnly Secure SameSite cookies
+logout revocation
+Browser/API Security
+Use:
+HTTPS only
+CORS allow-list
+CSRF protection
+security headers
+input validation
+request size limits
+generic error messages
+Zero Trust Security
+Use:
+authenticate every request
+authorise every action
+check tenant every query
+log sensitive actions
+deny by default
+least privilege
+________________________________________
+Implementation Phases
+Phase 1 — Basic Secure Auth
+Build first:
+•	register
+•	login
+•	logout
+•	password hashing
+•	JWT access token
+•	refresh token
+•	basic role check
+•	tenant check
+Phase 2 — Password Reset + Session Management
+Add:
+•	forgot password
+•	reset password
+•	active sessions
+•	revoke session
+•	audit logs
+Phase 3 — MFA
+Add:
+•	authenticator app MFA
+•	backup codes
+•	mandatory MFA for Owner/Admin
+Phase 4 — Passkeys
+Add:
+•	passkey registration
+•	passkey login
+•	passkey removal
+•	passkey audit logs
+Phase 5 — Hardening
+Add:
+•	rate limiting
+•	suspicious login detection
+•	security alerts
+•	dependency scanning
+•	OWASP testing
+•	penetration testing checklist
+________________________________________
+Best Tech Stack
+For your app:
+Layer	Use
+Frontend	React
+Backend	FastAPI or Node.js
+Database	PostgreSQL
+Password Hashing	Argon2id
+Passkeys	WebAuthn / FIDO2
+Auth Tokens	JWT + Refresh Token
+Email	SendGrid / SMTP
+Validation	Zod / Pydantic
+Deployment	Docker + Cloud VPS / Render / Railway
+________________________________________
+Final Module Summary
+The Authentication Module will implement:
+Email/password login
+Passkey login
+MFA
+JWT + refresh sessions
+RBAC connection
+Tenant isolation
+Secure password reset
+Device/session management
+Audit logs
+Zero Trust request checks
+Build order:
+Basic auth → roles → sessions → reset password → MFA → passkeys → hardening
+
