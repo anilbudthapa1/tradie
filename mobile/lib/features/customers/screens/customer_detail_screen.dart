@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../providers/customers_provider.dart';
+import 'customer_history_screen.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Design tokens
@@ -216,7 +217,7 @@ class _CustomerDetailScreenState extends ConsumerState<CustomerDetailScreen>
           _AddressesTab(detail: detail, customerId: widget.id),
           _ContactsTab(detail: detail, customerId: widget.id),
           _NotesTab(detail: detail, customerId: widget.id),
-          _HistoryTab(detail: detail),
+          _HistoryTab(detail: detail, customerId: widget.id),
         ],
       ),
     );
@@ -820,12 +821,16 @@ class _NoteCard extends StatelessWidget {
 
 class _HistoryTab extends StatelessWidget {
   final CustomerDetail detail;
-  const _HistoryTab({required this.detail});
+  final String customerId;
+  const _HistoryTab({required this.detail, required this.customerId});
 
   @override
   Widget build(BuildContext context) => ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          // Quick link into the unified timeline view (M19).
+          _UnifiedTimelineCard(customerId: customerId),
+          const SizedBox(height: 12),
           _SectionCard(
             title: 'Jobs',
             icon: Icons.work_outline_rounded,
@@ -852,6 +857,65 @@ class _HistoryTab extends StatelessWidget {
                     .toList(),
           ),
         ],
+      );
+}
+
+class _UnifiedTimelineCard extends StatelessWidget {
+  final String customerId;
+  const _UnifiedTimelineCard({required this.customerId});
+
+  @override
+  Widget build(BuildContext context) => Material(
+        color: _cardWhite,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) =>
+                  CustomerHistoryScreen(customerId: customerId),
+            ),
+          ),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: _borderColor),
+            ),
+            padding: const EdgeInsets.all(14),
+            child: Row(children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: _blue.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Icon(Icons.timeline_rounded,
+                    color: _blue, size: 18),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Unified Timeline',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 14,
+                            color: _navy)),
+                    SizedBox(height: 2),
+                    Text(
+                      'Jobs, quotes, invoices, payments and notes in one place',
+                      style: TextStyle(
+                          color: _textMuted, fontSize: 12, height: 1.3),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: _textMuted),
+            ]),
+          ),
+        ),
       );
 }
 

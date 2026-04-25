@@ -37,6 +37,13 @@ func RequireOwner() func(http.Handler) http.Handler        { return RequireAtLea
 func RequireOwnerOrAdmin() func(http.Handler) http.Handler { return RequireAtLeast("admin") }
 func RequireManager() func(http.Handler) http.Handler      { return RequireAtLeast("manager") }
 
+// IsAtLeast is a non-middleware role check for in-handler decisions
+// (e.g. "is the caller allowed to act on a record they don't own").
+// Returns true if `role` ranks >= `minRole` in the hierarchy.
+func IsAtLeast(role, minRole string) bool {
+	return roleLevel[role] >= roleLevel[minRole]
+}
+
 // ── Subscription context ───────────────────────────────────────────
 
 type contextSubKey struct{}

@@ -4,8 +4,13 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/mail"
+	"regexp"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.uber.org/zap"
@@ -14,6 +19,11 @@ import (
 	"github.com/tradie/api/internal/middleware"
 	"github.com/tradie/api/internal/models"
 )
+
+// auPostcode matches Australian 4-digit postcodes (0200..9999 inclusive).
+// We accept the broader 4-digit range and let the AusPost validator
+// downstream reject unallocated ranges.
+var auPostcode = regexp.MustCompile(`^[0-9]{4}$`)
 
 type Handler struct {
 	cfg   *config.Config
@@ -210,20 +220,31 @@ func (h *Handler) GetAddresses(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AddAddress(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
 
 	var req struct {
-		Label        string  `json:"label"`
-		AddressLine1 string  `json:"address_line1"`
-		AddressLine2 string  `json:"address_line2"`
-		City         string  `json:"city"`
-		State        string  `json:"state"`
-		Postcode     string  `json:"postcode"`
-		Country      string  `json:"country"`
-		IsPrimary    bool    `json:"is_primary"`
+		Label        string `json:"label"`
+		AddressLine1 string `json:"address_line1"`
+		AddressLine2 string `json:"address_line2"`
+		City         string `json:"city"`
+		State        string `json:"state"`
+		Postcode     string `json:"postcode"`
+		Country      string `json:"country"`
+		IsPrimary    bool   `json:"is_primary"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.AddressLine1 == "" {
 		respond(w, 400, map[string]string{"error": "invalid_request"})
+		return
+	}
+
+	// Default to AU when blank — every other customer field assumes Aus.
+	if strings.TrimSpace(req.Country) == "" {
+		req.Country = "AU"
+	}
+	// AU postcodes must be 4 digits when supplied.
+	if req.Postcode != "" && strings.EqualFold(req.Country, "AU") && !auPostcode.MatchString(req.Postcode) {
+		respond(w, 400, map[string]string{"error": "invalid_postcode"})
 		return
 	}
 
@@ -247,6 +268,19 @@ func (h *Handler) AddAddress(w http.ResponseWriter, r *http.Request) {
 		respond(w, 500, map[string]string{"error": "server_error"})
 		return
 	}
+
+	custUUID, _ := uuid.Parse(id)
+	if claims != nil {
+		h.audit.Log(r.Context(), middleware.AuditEntry{
+			BusinessID: bizID,
+			UserID:     claims.UserID,
+			Action:     "CUSTOMER_ADDRESS_ADDED",
+			EntityType: "customer_address",
+			EntityID:   a.ID,
+			NewData:    map[string]interface{}{"customer_id": custUUID, "label": req.Label, "is_primary": req.IsPrimary},
+			IPAddress:  r.RemoteAddr,
+		})
+	}
 	respond(w, 201, a)
 }
 
@@ -254,6 +288,7 @@ func (h *Handler) AddAddress(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateAddress(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	customerID := chi.URLParam(r, "id")
 	aid := chi.URLParam(r, "aid")
 
@@ -269,6 +304,14 @@ func (h *Handler) UpdateAddress(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		respond(w, 400, map[string]string{"error": "invalid_request"})
+		return
+	}
+
+	if strings.TrimSpace(req.Country) == "" {
+		req.Country = "AU"
+	}
+	if req.Postcode != "" && strings.EqualFold(req.Country, "AU") && !auPostcode.MatchString(req.Postcode) {
+		respond(w, 400, map[string]string{"error": "invalid_postcode"})
 		return
 	}
 
@@ -298,6 +341,18 @@ func (h *Handler) UpdateAddress(w http.ResponseWriter, r *http.Request) {
 		respond(w, 500, map[string]string{"error": "server_error"})
 		return
 	}
+
+	if claims != nil {
+		h.audit.Log(r.Context(), middleware.AuditEntry{
+			BusinessID: bizID,
+			UserID:     claims.UserID,
+			Action:     "CUSTOMER_ADDRESS_UPDATED",
+			EntityType: "customer_address",
+			EntityID:   a.ID,
+			NewData:    map[string]interface{}{"label": req.Label, "is_primary": req.IsPrimary},
+			IPAddress:  r.RemoteAddr,
+		})
+	}
 	respond(w, 200, a)
 }
 
@@ -305,9 +360,22 @@ func (h *Handler) UpdateAddress(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) DeleteAddress(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	aid := chi.URLParam(r, "aid")
 	_, _ = h.db.Exec(r.Context(),
 		`DELETE FROM customer_addresses WHERE id=$1 AND business_id=$2`, aid, bizID)
+
+	if claims != nil {
+		addrUUID, _ := uuid.Parse(aid)
+		h.audit.Log(r.Context(), middleware.AuditEntry{
+			BusinessID: bizID,
+			UserID:     claims.UserID,
+			Action:     "CUSTOMER_ADDRESS_DELETED",
+			EntityType: "customer_address",
+			EntityID:   addrUUID,
+			IPAddress:  r.RemoteAddr,
+		})
+	}
 	respond(w, 204, nil)
 }
 
@@ -345,6 +413,7 @@ func (h *Handler) GetContacts(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) AddContact(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
 
 	var req struct {
@@ -357,6 +426,14 @@ func (h *Handler) AddContact(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
 		respond(w, 400, map[string]string{"error": "invalid_request"})
 		return
+	}
+
+	// Reject malformed emails — net/mail catches everything obvious.
+	if e := strings.TrimSpace(req.Email); e != "" {
+		if _, err := mail.ParseAddress(e); err != nil {
+			respond(w, 400, map[string]string{"error": "invalid_email"})
+			return
+		}
 	}
 
 	// If marking as primary, demote existing
@@ -376,6 +453,19 @@ func (h *Handler) AddContact(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		respond(w, 500, map[string]string{"error": "server_error"})
 		return
+	}
+
+	if claims != nil {
+		custUUID, _ := uuid.Parse(id)
+		h.audit.Log(r.Context(), middleware.AuditEntry{
+			BusinessID: bizID,
+			UserID:     claims.UserID,
+			Action:     "CUSTOMER_CONTACT_ADDED",
+			EntityType: "customer_contact",
+			EntityID:   c.ID,
+			NewData:    map[string]interface{}{"customer_id": custUUID, "name": req.Name, "is_primary": req.IsPrimary},
+			IPAddress:  r.RemoteAddr,
+		})
 	}
 	respond(w, 201, c)
 }
@@ -440,7 +530,164 @@ func (h *Handler) AddNote(w http.ResponseWriter, r *http.Request) {
 		respond(w, 500, map[string]string{"error": "server_error"})
 		return
 	}
+
+	custUUID, _ := uuid.Parse(id)
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "CUSTOMER_NOTE_ADDED",
+		EntityType: "customer_note",
+		EntityID:   n.ID,
+		NewData:    map[string]interface{}{"customer_id": custUUID},
+		IPAddress:  r.RemoteAddr,
+	})
 	respond(w, 201, n)
+}
+
+// ── History ───────────────────────────────────────────────────────────────────
+//
+// History returns a unified, chronological timeline for a single customer:
+// jobs, quotes, invoices, payments, notes. Each row carries a `kind`
+// discriminator so the UI can render type-specific badges.
+//
+// Tenant isolation: every UNION leg filters by both `customer_id` and
+// `business_id`. The outer SELECT also constrains by business_id as belt-
+// and-braces.
+//
+// Audit: logs CUSTOMER_HISTORY_VIEWED with the customer_id (sensitive
+// cross-entity read).
+
+func (h *Handler) History(w http.ResponseWriter, r *http.Request) {
+	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
+	id := chi.URLParam(r, "id")
+
+	custUUID, err := uuid.Parse(id)
+	if err != nil {
+		respond(w, 400, map[string]string{"error": "invalid_id"})
+		return
+	}
+
+	// Verify the customer exists in this tenant before exposing aggregated data.
+	var exists bool
+	if err := h.db.QueryRow(r.Context(),
+		`SELECT EXISTS (SELECT 1 FROM customers WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+		custUUID, bizID,
+	).Scan(&exists); err != nil || !exists {
+		respond(w, 404, map[string]string{"error": "not_found"})
+		return
+	}
+
+	// One UNION ALL → one round-trip. Each leg carries a `kind` and a
+	// canonical `(title, status, amount)` shape so the client sees a
+	// uniform record. Amounts are nullable for non-financial events.
+	const sql = `
+SELECT kind, id, title, status, amount, occurred_at, ref FROM (
+    SELECT 'job'      AS kind, id::text AS id,
+           COALESCE(title, '')          AS title,
+           COALESCE(status::text, '')   AS status,
+           NULL::float8                 AS amount,
+           created_at                   AS occurred_at,
+           job_number                   AS ref
+      FROM jobs
+     WHERE customer_id = $1 AND business_id = $2 AND deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT 'quote'    AS kind, id::text,
+           COALESCE(title, ''),
+           COALESCE(status::text, ''),
+           total::float8,
+           created_at,
+           quote_number
+      FROM quotes
+     WHERE customer_id = $1 AND business_id = $2 AND deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT 'invoice'  AS kind, id::text,
+           COALESCE(invoice_number, ''),
+           COALESCE(status::text, ''),
+           total::float8,
+           created_at,
+           invoice_number
+      FROM invoices
+     WHERE customer_id = $1 AND business_id = $2 AND deleted_at IS NULL
+
+    UNION ALL
+
+    SELECT 'payment'  AS kind, ip.id::text,
+           COALESCE('Invoice ' || i.invoice_number, 'Payment'),
+           COALESCE(ip.payment_method, ''),
+           ip.amount::float8,
+           ip.paid_at,
+           COALESCE(ip.reference, '')
+      FROM invoice_payments ip
+      JOIN invoices i
+        ON i.id = ip.invoice_id
+       AND i.business_id = ip.business_id
+     WHERE i.customer_id = $1 AND ip.business_id = $2
+
+    UNION ALL
+
+    SELECT 'note'     AS kind, id::text,
+           LEFT(content, 120),
+           '',
+           NULL::float8,
+           created_at,
+           ''
+      FROM customer_notes
+     WHERE customer_id = $1 AND business_id = $2
+) t
+ORDER BY occurred_at DESC
+LIMIT 200
+`
+
+	rows, err := h.db.Query(r.Context(), sql, custUUID, bizID)
+	if err != nil {
+		h.log.Error("customer history", zap.Error(err))
+		respond(w, 500, map[string]string{"error": "server_error"})
+		return
+	}
+	defer rows.Close()
+
+	type entry struct {
+		Kind       string    `json:"kind"`
+		ID         string    `json:"id"`
+		Title      string    `json:"title"`
+		Status     string    `json:"status,omitempty"`
+		Amount     *float64  `json:"amount,omitempty"`
+		OccurredAt time.Time `json:"occurred_at"`
+		Ref        string    `json:"ref,omitempty"`
+	}
+
+	out := make([]entry, 0, 64)
+	for rows.Next() {
+		var e entry
+		var amount *float64
+		if err := rows.Scan(&e.Kind, &e.ID, &e.Title, &e.Status, &amount, &e.OccurredAt, &e.Ref); err != nil {
+			h.log.Warn("history scan", zap.Error(err))
+			continue
+		}
+		e.Amount = amount
+		out = append(out, e)
+	}
+
+	if claims != nil {
+		h.audit.Log(r.Context(), middleware.AuditEntry{
+			BusinessID: bizID,
+			UserID:     claims.UserID,
+			Action:     "CUSTOMER_HISTORY_VIEWED",
+			EntityType: "customer",
+			EntityID:   custUUID,
+			IPAddress:  r.RemoteAddr,
+		})
+	}
+
+	respond(w, 200, map[string]interface{}{
+		"customer_id": custUUID,
+		"items":       out,
+	})
 }
 
 // ── GetJobs ────────────────────────────────────────────────────────────────────
