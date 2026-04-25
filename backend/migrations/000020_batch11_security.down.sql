@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS saved_filters CASCADE;
+DROP TABLE IF EXISTS role_permissions CASCADE;
+DROP TABLE IF EXISTS permissions CASCADE;
+DROP TABLE IF EXISTS bulk_import_jobs CASCADE;
