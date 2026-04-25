@@ -237,4 +237,67 @@ class SettingsNotifier extends StateNotifier<AsyncValue<void>> {
       return null;
     }
   }
+
+  // ── OAuth integrations (M115-M118) ──────────────────────────────
+  /// Returns the per-provider connection state map for the current business.
+  Future<Map<String, dynamic>?> getIntegrationsStatus() async {
+    try {
+      final resp = await _api.get('/integrations/status');
+      return (resp.data as Map<String, dynamic>)['providers']
+          as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Returns the OAuth authorize URL for the given provider, ready to open
+  /// in an external browser.
+  Future<String?> startOAuthConnect(String provider) async {
+    try {
+      final resp = await _api.get('/integrations/$provider/connect');
+      return (resp.data as Map<String, dynamic>)['url'] as String?;
+    } on DioException catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> disconnectIntegration(String provider) async {
+    try {
+      await _api.delete('/integrations/$provider');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // ── Stripe billing portal (used by integrations screen) ─────────
+  Future<Map<String, dynamic>?> getStripeStatus() async {
+    try {
+      final resp = await _api.get('/integrations/status');
+      final providers =
+          (resp.data as Map<String, dynamic>)['providers'] as Map?;
+      // Stripe status is reported by the subscription endpoint, not OAuth.
+      // We surface a thin shape here so the existing tile can render.
+      final sub =
+          await _api.get('/subscription').then((r) => r.data as Map?);
+      final connected = sub?['stripe_subscription_id'] != null &&
+          (sub!['stripe_subscription_id'] as String).isNotEmpty;
+      return {
+        'connected': connected,
+        'providers': providers,
+      };
+    } catch (_) {
+      return {'connected': false};
+    }
+  }
+
+  Future<Map<String, dynamic>?> createBillingPortal() async {
+    try {
+      final resp =
+          await _api.post('/integrations/stripe/portal');
+      return resp.data as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
 }

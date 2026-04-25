@@ -24,17 +24,44 @@ import (
 
 const maxUploadSize = 50 << 20 // 50 MB
 
+// allowedMimeTypes is the upload allowlist (M120). Anything outside this set
+// is rejected at the upload boundary. Add to this list when a new business
+// case is approved — never widen it casually.
+var allowedMimeTypes = map[string]bool{
+	"image/jpeg":      true,
+	"image/jpg":       true,
+	"image/png":       true,
+	"image/heic":      true,
+	"image/heif":      true,
+	"application/pdf": true,
+	"text/csv":        true,
+}
+
 type Handler struct {
 	cfg    *config.Config
 	db     *pgxpool.Pool
 	log    *zap.Logger
 	s3     *s3.Client
 	bucket string
+	audit  *middleware.AuditService
 }
 
+// NewHandler accepts an optional *middleware.AuditService as the first variadic
+// argument. The router currently calls NewHandler(cfg, db, log) without an
+// audit service — when one isn't passed we lazily construct one from the DB
+// pool so FILE_UPLOADED events are still recorded.
 func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, args ...interface{}) *Handler {
 	s3Client := buildS3Client(cfg)
-	return &Handler{cfg: cfg, db: db, log: log, s3: s3Client, bucket: cfg.S3Bucket}
+	h := &Handler{cfg: cfg, db: db, log: log, s3: s3Client, bucket: cfg.S3Bucket}
+	for _, a := range args {
+		if svc, ok := a.(*middleware.AuditService); ok && svc != nil {
+			h.audit = svc
+		}
+	}
+	if h.audit == nil {
+		h.audit = middleware.NewAuditService(db, log)
+	}
+	return h
 }
 
 func buildS3Client(cfg *config.Config) *s3.Client {
@@ -95,6 +122,13 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	contentType := header.Header.Get("Content-Type")
 	if contentType == "" {
 		contentType = "application/octet-stream"
+	}
+	// Normalise: the multipart header sometimes carries parameters
+	// (e.g. "image/jpeg; charset=...") — split on ';' and lower-case.
+	mimeKey := strings.ToLower(strings.TrimSpace(strings.SplitN(contentType, ";", 2)[0]))
+	if !allowedMimeTypes[mimeKey] {
+		respondErr(w, http.StatusUnsupportedMediaType, "unsupported file type")
+		return
 	}
 
 	entityType := r.FormValue("entity_type")
@@ -157,7 +191,9 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 	if err := row.Scan(&result.ID, &result.BusinessID, &result.EntityType, &result.EntityID,
 		&result.Name, &result.URL, &result.Size, &result.MimeType, &result.CreatedAt); err != nil {
 		h.log.Error("insert file record", zap.Error(err))
-		// Still return the URL even if DB insert fails
+		// Still return the URL even if DB insert fails — but we still audit
+		// the upload because the bytes are now in S3.
+		h.auditUpload(r, bizID, claims.UserID, fileID, entityType, entityID, header.Size, mimeKey)
 		respond(w, http.StatusCreated, map[string]interface{}{
 			"id":  fileID,
 			"url": fileURL,
@@ -166,7 +202,33 @@ func (h *Handler) Upload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.auditUpload(r, bizID, claims.UserID, fileID, entityType, entityID, header.Size, mimeKey)
 	respond(w, http.StatusCreated, result)
+}
+
+// auditUpload records a FILE_UPLOADED entry. Scope kept minimal so we don't
+// store filename / URL — just enough for forensics + storage attribution.
+func (h *Handler) auditUpload(r *http.Request, bizID, userID, fileID uuid.UUID, entityType string, entityID *uuid.UUID, size int64, mime string) {
+	if h.audit == nil {
+		return
+	}
+	new := map[string]interface{}{
+		"size":        size,
+		"mime":        mime,
+		"entity_type": entityType,
+	}
+	if entityID != nil {
+		new["entity_id"] = entityID.String()
+	}
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     userID,
+		Action:     "FILE_UPLOADED",
+		EntityType: "file",
+		EntityID:   fileID,
+		IPAddress:  r.RemoteAddr,
+		NewData:    new,
+	})
 }
 
 // Get — GET /api/v1/files/{id}
