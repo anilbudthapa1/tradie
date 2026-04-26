@@ -74,4 +74,17 @@ class TaskNotifier extends StateNotifier<AsyncValue<void>> {
       return e.response?.data?['error'] ?? 'update_failed';
     }
   }
+
+  /// Snooze a task — calls POST /api/v1/tasks/{id}/snooze.
+  /// `duration` is one of "15m", "1h", "tomorrow", "1d".
+  Future<bool> snooze(String id, {String duration = '1h'}) async {
+    try {
+      await _api.post('/tasks/$id/snooze', data: {'duration': duration});
+      _ref.invalidate(tasksProvider);
+      _ref.invalidate(dashboardStatsProvider);
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
 }

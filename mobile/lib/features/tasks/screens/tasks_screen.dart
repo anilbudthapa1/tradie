@@ -267,23 +267,79 @@ class _ActionMenu extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     return PopupMenuButton<String>(
       onSelected: (v) async {
-        if (v == 'complete') {
-          await ref.read(taskNotifierProvider.notifier).complete(task['id'].toString());
-        } else if (v == 'delete') {
-          await ref.read(taskNotifierProvider.notifier).delete(task['id'].toString());
+        final id = task['id'].toString();
+        final notifier = ref.read(taskNotifierProvider.notifier);
+        switch (v) {
+          case 'complete':
+            await notifier.complete(id);
+            break;
+          case 'delete':
+            await notifier.delete(id);
+            break;
+          case 'snooze_1h':
+            final ok = await notifier.snooze(id, duration: '1h');
+            if (context.mounted) {
+              _toast(context, ok ? 'Snoozed for 1 hour' : 'Snooze failed');
+            }
+            break;
+          case 'snooze_tomorrow':
+            final ok =
+                await notifier.snooze(id, duration: 'tomorrow');
+            if (context.mounted) {
+              _toast(context,
+                  ok ? 'Snoozed until tomorrow 9am' : 'Snooze failed');
+            }
+            break;
         }
       },
       itemBuilder: (_) => [
-        const PopupMenuItem(value: 'complete', child: Row(children: [
-          Icon(Iconsax.tick_circle, size: 16, color: TradieColors.successGreen),
-          SizedBox(width: 8), Text('Mark Complete'),
-        ])),
-        const PopupMenuItem(value: 'delete', child: Row(children: [
-          Icon(Iconsax.trash, size: 16, color: TradieColors.alertRed),
-          SizedBox(width: 8), Text('Delete', style: TextStyle(color: TradieColors.alertRed)),
-        ])),
+        const PopupMenuItem(
+          value: 'complete',
+          child: Row(children: [
+            Icon(Iconsax.tick_circle,
+                size: 16, color: TradieColors.successGreen),
+            SizedBox(width: 8),
+            Text('Mark Complete'),
+          ]),
+        ),
+        const PopupMenuItem(
+          value: 'snooze_1h',
+          child: Row(children: [
+            Icon(Iconsax.clock, size: 16, color: TradieColors.electricBlue),
+            SizedBox(width: 8),
+            Text('Snooze 1 hour'),
+          ]),
+        ),
+        const PopupMenuItem(
+          value: 'snooze_tomorrow',
+          child: Row(children: [
+            Icon(Iconsax.calendar_1,
+                size: 16, color: TradieColors.electricBlue),
+            SizedBox(width: 8),
+            Text('Snooze to tomorrow'),
+          ]),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem(
+          value: 'delete',
+          child: Row(children: [
+            Icon(Iconsax.trash, size: 16, color: TradieColors.alertRed),
+            SizedBox(width: 8),
+            Text('Delete', style: TextStyle(color: TradieColors.alertRed)),
+          ]),
+        ),
       ],
       child: const Icon(Iconsax.more, size: 18, color: TradieColors.grey400),
+    );
+  }
+
+  void _toast(BuildContext context, String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: TradieColors.navy,
+        duration: const Duration(seconds: 2),
+      ),
     );
   }
 }
