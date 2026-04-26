@@ -29,6 +29,13 @@ class DashboardScreen extends ConsumerWidget {
 
     return Scaffold(
       backgroundColor: TradieColors.white,
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.go('/check-in'),
+        backgroundColor: TradieColors.electricBlue,
+        foregroundColor: TradieColors.white,
+        icon: const Icon(Iconsax.clock),
+        label: const Text('Check in'),
+      ),
       body: RefreshIndicator(
         onRefresh: () async {
           ref.invalidate(dashboardStatsProvider);

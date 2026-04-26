@@ -39,6 +39,7 @@ import '../../features/leave/screens/leave_management_screen.dart';
 import '../../features/localization/screens/localization_screen.dart';
 import '../../features/payroll/screens/payroll_screen.dart';
 import '../../features/payslips/screens/payslip_generator_screen.dart';
+import '../../features/workers/screens/check_in_screen.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/shell_scaffold.dart';
 
@@ -155,6 +156,9 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(path: '/tasks', builder: (_, __) => const TasksScreen()),
+          GoRoute(
+              path: '/check-in',
+              builder: (_, __) => const CheckInScreen()),
           GoRoute(
               path: '/leave',
               builder: (_, __) => const LeaveManagementScreen()),
