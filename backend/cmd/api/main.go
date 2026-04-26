@@ -15,6 +15,7 @@ import (
 
 	"github.com/tradie/api/internal/config"
 	"github.com/tradie/api/internal/db"
+	"github.com/tradie/api/internal/middleware"
 	"github.com/tradie/api/internal/router"
 )
 
@@ -29,7 +30,12 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	pool, err := db.Connect(ctx, cfg.DatabaseURL)
+	var dbOpts []db.ConfigOption
+	if cfg.RLSEnabled {
+		dbOpts = append(dbOpts, middleware.WithTenantRLSHooks(log))
+		log.Info("RLS enabled: per-request tenant GUC will be set on every pool acquire")
+	}
+	pool, err := db.Connect(ctx, cfg.DatabaseURL, dbOpts...)
 	if err != nil {
 		log.Fatal("db connect", zap.Error(err))
 	}

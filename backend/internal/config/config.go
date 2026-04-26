@@ -49,12 +49,21 @@ type Config struct {
 	SentryDSN string
 
 	AnthropicAPIKey string
+
+	// RLSEnabled toggles per-request `set_tenant()` calls on every pool
+	// acquire (see internal/middleware/rls_pool.go). Requires migration
+	// 000043 to be applied. Off by default during rollout — flip to true
+	// once integration tests confirm no handler relies on cross-tenant
+	// reads via the pool (admin scripts and the public Stripe webhook
+	// run with no bizID in ctx and therefore bypass policies cleanly).
+	RLSEnabled bool
 }
 
 func Load() *Config {
 	accessTTL, _ := time.ParseDuration(getEnv("JWT_ACCESS_TTL", "15m"))
 	refreshTTL, _ := time.ParseDuration(getEnv("JWT_REFRESH_TTL", "720h"))
 	pathStyle, _ := strconv.ParseBool(getEnv("S3_USE_PATH_STYLE", "false"))
+	rlsEnabled, _ := strconv.ParseBool(getEnv("RLS_ENABLED", "false"))
 
 	origins := []string{getEnv("FRONTEND_URL", "http://localhost:3000")}
 
@@ -101,6 +110,8 @@ func Load() *Config {
 		SentryDSN: getEnv("SENTRY_DSN", ""),
 
 		AnthropicAPIKey: getEnv("ANTHROPIC_API_KEY", ""),
+
+		RLSEnabled: rlsEnabled,
 	}
 }
 
