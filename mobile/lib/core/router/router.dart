@@ -39,6 +39,7 @@ import '../../features/leave/screens/leave_management_screen.dart';
 import '../../features/localization/screens/localization_screen.dart';
 import '../../features/payroll/screens/payroll_screen.dart';
 import '../../features/payslips/screens/payslip_generator_screen.dart';
+import '../../features/jobs/screens/voice_notes_screen.dart';
 import '../../features/workers/screens/check_in_screen.dart';
 import '../providers/auth_provider.dart';
 import '../widgets/shell_scaffold.dart';
@@ -121,8 +122,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
                   path: ':id/complete',
                   builder: (ctx, s) =>
                       JobCompleteScreen(id: s.pathParameters['id']!)),
+              GoRoute(
+                  path: ':id/voice-notes',
+                  builder: (ctx, s) => VoiceNotesScreen(
+                        jobId: s.pathParameters['id'],
+                        jobTitle: s.extra as String?,
+                      )),
             ],
           ),
+          GoRoute(
+              path: '/voice-notes',
+              builder: (_, __) => const VoiceNotesScreen()),
           GoRoute(
             path: '/customers',
             builder: (_, __) => const CustomersListScreen(),

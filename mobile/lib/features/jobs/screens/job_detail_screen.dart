@@ -91,6 +91,14 @@ class _JobDetailScreenState extends ConsumerState<JobDetailScreen>
               style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: status.jobStatusColor),
             ),
           ),
+          IconButton(
+            icon: const Icon(Iconsax.microphone_2, size: 20),
+            tooltip: 'Voice notes',
+            onPressed: () => context.push(
+              '/jobs/${widget.id}/voice-notes',
+              extra: job.title,
+            ),
+          ),
           IconButton(icon: const Icon(Iconsax.edit_2, size: 20), onPressed: () {}),
           IconButton(icon: const Icon(Iconsax.more_circle, size: 20), onPressed: () {}),
         ],
