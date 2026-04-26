@@ -914,7 +914,7 @@ func (h *Handler) CreatePaymentLink(w http.ResponseWriter, r *http.Request) {
 
 	frontendURL := h.cfg.FrontendURL
 	if frontendURL == "" {
-		frontendURL = "https://defecexinso.com"
+		frontendURL = "https://tradie.defencexinso.com"
 	}
 	respond(w, 200, map[string]string{
 		"payment_url": fmt.Sprintf("%s/pay/%s", frontendURL, token),

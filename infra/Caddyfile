@@ -1,4 +1,4 @@
-# defecexinso.com — TLS via Let's Encrypt, served by Caddy.
+# tradie.defencexinso.com — TLS via Let's Encrypt, served by Caddy.
 #
 # - /api/*  → backend API (Go service in the api container).
 # - /ws     → backend WebSocket (legacy hub).
@@ -7,12 +7,12 @@
 # - everything else → static Flutter web build at /srv/web.
 #
 # Caddy auto-issues + renews certs for the configured hostname. Make
-# sure the A record for defecexinso.com points at this server and ports
-# 80 + 443 are open in the firewall before first start.
+# sure the A record for tradie.defencexinso.com points at this server
+# and ports 80 + 443 are open in the firewall before first start.
 
 {
 	# Email used by Let's Encrypt for expiry notices + recovery.
-	email admin@defecexinso.com
+	email admin@defencexinso.com
 
 	# Sensible global defaults.
 	servers {
@@ -20,7 +20,7 @@
 	}
 }
 
-defecexinso.com, www.defecexinso.com {
+tradie.defencexinso.com {
 	# Force HTTPS, HSTS preload, basic hardening.
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"

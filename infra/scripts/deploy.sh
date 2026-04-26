@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Server-side deploy for defecexinso.com.
+# Server-side deploy for defencexinso.com.
 #
 # Idempotent. Safe to re-run. Run from the project root on the server:
 #   bash infra/scripts/deploy.sh
@@ -49,7 +49,7 @@ docker compose -f "$COMPOSE_FILE" exec caddy caddy reload --config /etc/caddy/Ca
 
 echo "→ Health check…"
 sleep 3
-if curl -fsS https://defecexinso.com/health >/dev/null; then
+if curl -fsS https://tradie.defencexinso.com/health >/dev/null; then
   echo "✓ live"
 else
   echo "✗ /health did not respond — check 'docker compose logs api' and 'docker compose logs caddy'"
