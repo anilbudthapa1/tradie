@@ -15,13 +15,14 @@ import (
 )
 
 type Handler struct {
-	cfg *config.Config
-	db  *pgxpool.Pool
-	log *zap.Logger
+	cfg   *config.Config
+	db    *pgxpool.Pool
+	log   *zap.Logger
+	audit *middleware.AuditService
 }
 
-func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, args ...interface{}) *Handler {
-	return &Handler{cfg: cfg, db: db, log: log}
+func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, audit *middleware.AuditService) *Handler {
+	return &Handler{cfg: cfg, db: db, log: log, audit: audit}
 }
 
 // ── Dashboard ─────────────────────────────────────────────────────
@@ -400,7 +401,7 @@ func (h *Handler) IncomeExpense(w http.ResponseWriter, r *http.Request) {
 		   GROUP BY mo
 		 ) i ON i.mo=m
 		 LEFT JOIN (
-		   SELECT DATE_TRUNC('month', expense_date) AS mo, SUM(amount) AS expense
+		   SELECT DATE_TRUNC('month', date) AS mo, SUM(amount) AS expense
 		   FROM expenses WHERE business_id=$1
 		   GROUP BY mo
 		 ) e ON e.mo=m
@@ -429,7 +430,7 @@ func (h *Handler) GSTBAS(w http.ResponseWriter, r *http.Request) {
 	).Scan(&gstCollected)
 	_ = h.db.QueryRow(r.Context(),
 		`SELECT COALESCE(SUM(tax_amount),0) FROM expenses
-		 WHERE business_id=$1 AND expense_date >= DATE_TRUNC('quarter', NOW())`, bizID,
+		 WHERE business_id=$1 AND date >= DATE_TRUNC('quarter', NOW())`, bizID,
 	).Scan(&gstPaid)
 	respond(w, 200, map[string]interface{}{
 		"gst_collected": gstCollected,
@@ -448,7 +449,7 @@ func (h *Handler) QuarterlyTax(w http.ResponseWriter, r *http.Request) {
 	).Scan(&income)
 	_ = h.db.QueryRow(r.Context(),
 		`SELECT COALESCE(SUM(amount),0) FROM expenses
-		 WHERE business_id=$1 AND expense_date >= DATE_TRUNC('quarter', NOW())`, bizID,
+		 WHERE business_id=$1 AND date >= DATE_TRUNC('quarter', NOW())`, bizID,
 	).Scan(&expense)
 	respond(w, 200, map[string]interface{}{
 		"income": income, "expense": expense, "profit": income - expense,
@@ -460,6 +461,7 @@ func (h *Handler) QuarterlyTax(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	exportType := r.URL.Query().Get("type")
 	start := r.URL.Query().Get("start")
 	end := r.URL.Query().Get("end")
@@ -469,6 +471,14 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 	if start == "" {
 		start = time.Now().AddDate(0, -1, 0).Format("2006-01-02")
 	}
+
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "REPORT_EXPORT_CSV",
+		EntityType: "report",
+		NewData:    map[string]interface{}{"type": exportType, "start": start, "end": end},
+	})
 
 	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="`+exportType+`_export.csv"`)
@@ -584,7 +594,16 @@ func (h *Handler) ExportCSV(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	reportType := r.URL.Query().Get("type")
+
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "REPORT_EXPORT_PDF",
+		EntityType: "report",
+		NewData:    map[string]interface{}{"type": reportType},
+	})
 
 	var data interface{}
 
@@ -661,10 +680,19 @@ func (h *Handler) ExportPDF(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) YearEnd(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	yearStr := r.URL.Query().Get("year")
 	if yearStr == "" {
 		yearStr = fmt.Sprintf("%d", time.Now().Year())
 	}
+
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "REPORT_EXPORT_YEAR_END",
+		EntityType: "report",
+		NewData:    map[string]interface{}{"year": yearStr},
+	})
 
 	var revenue, expenses float64
 	var jobsCompleted, newCustomers int
@@ -678,7 +706,7 @@ func (h *Handler) YearEnd(w http.ResponseWriter, r *http.Request) {
 	_ = h.db.QueryRow(r.Context(),
 		`SELECT COALESCE(SUM(amount),0) FROM expenses
 		 WHERE business_id=$1
-		   AND EXTRACT(YEAR FROM expense_date) = $2::int`, bizID, yearStr,
+		   AND EXTRACT(YEAR FROM date) = $2::int`, bizID, yearStr,
 	).Scan(&expenses)
 
 	_ = h.db.QueryRow(r.Context(),
@@ -711,10 +739,10 @@ func (h *Handler) YearEnd(w http.ResponseWriter, r *http.Request) {
 		   GROUP BY mo
 		 ) inc ON inc.mo = month
 		 LEFT JOIN (
-		   SELECT DATE_TRUNC('month', expense_date) AS mo, SUM(amount) AS expense
+		   SELECT DATE_TRUNC('month', date) AS mo, SUM(amount) AS expense
 		   FROM expenses
 		   WHERE business_id=$1
-		     AND EXTRACT(YEAR FROM expense_date) = $2::int
+		     AND EXTRACT(YEAR FROM date) = $2::int
 		   GROUP BY mo
 		 ) exp ON exp.mo = month
 		 ORDER BY month`, bizID, yearStr)

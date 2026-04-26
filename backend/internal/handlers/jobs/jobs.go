@@ -212,8 +212,25 @@ func (h *Handler) UpdateStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	jobID := chi.URLParam(r, "id")
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
+	jobUUID, _ := uuid.Parse(jobID)
+
+	var oldStatus string
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT status FROM jobs WHERE id=$1 AND business_id=$2`, jobID, bizID).Scan(&oldStatus)
+
 	_, _ = h.db.Exec(r.Context(),
 		`UPDATE jobs SET status=$1, updated_at=NOW() WHERE id=$2 AND business_id=$3`, req.Status, jobID, bizID)
+
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "JOB_STATUS_UPDATED",
+		EntityType: "job",
+		EntityID:   jobUUID,
+		OldData:    map[string]interface{}{"status": oldStatus},
+		NewData:    map[string]interface{}{"status": req.Status},
+	})
 	respond(w, 200, map[string]string{"status": req.Status})
 }
 
@@ -384,6 +401,15 @@ func (h *Handler) UploadPhoto(w http.ResponseWriter, r *http.Request) {
 	}
 	p.JobID, _ = uuid.Parse(jobID)
 	p.URL = req.URL
+
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "JOB_PHOTO_UPLOADED",
+		EntityType: "job_photo",
+		EntityID:   p.ID,
+		NewData:    map[string]interface{}{"job_id": jobID, "phase": req.Phase, "file_id": fileID.String()},
+	})
 	respond(w, 201, p)
 }
 

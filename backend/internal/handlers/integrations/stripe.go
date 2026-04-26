@@ -58,7 +58,7 @@ func (h *StripeHandler) CreateCheckoutSession(w http.ResponseWriter, r *http.Req
 	stripe.Key = h.cfg.StripeSecretKey
 
 	// Get or create Stripe customer for this business.
-	stripeCustomerID := h.getOrCreateStripeCustomer(r, bizID.String(), claims.UserID)
+	stripeCustomerID := h.getOrCreateStripeCustomer(r, bizID.String(), claims.UserID.String())
 
 	successURL := req.SuccessURL
 	if successURL == "" {

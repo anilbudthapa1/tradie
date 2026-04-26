@@ -481,6 +481,18 @@ func (h *Handler) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	_, _ = h.db.Exec(r.Context(), `UPDATE users SET password_hash=$1 WHERE id=$2`, newHash, userID)
 	_, _ = h.db.Exec(r.Context(), `UPDATE password_reset_tokens SET used_at=NOW() WHERE token_hash=$1`, hashed)
 	_, _ = h.db.Exec(r.Context(), `UPDATE refresh_tokens SET revoked_at=NOW() WHERE user_id=$1 AND revoked_at IS NULL`, userID)
+
+	// Audit the security event. Public route — derive business_id from the user.
+	var businessID uuid.UUID
+	_ = h.db.QueryRow(r.Context(), `SELECT business_id FROM users WHERE id=$1`, userID).Scan(&businessID)
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: businessID,
+		UserID:     userID,
+		Action:     "PASSWORD_RESET",
+		EntityType: "user",
+		EntityID:   userID,
+		IPAddress:  r.RemoteAddr,
+	})
 	respondJSON(w, http.StatusOK, map[string]string{"message": "password_reset"})
 }
 

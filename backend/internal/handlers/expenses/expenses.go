@@ -508,10 +508,19 @@ func (h *Handler) ScanReceipt(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ExportAccountant(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	q := r.URL.Query()
 
 	dateFrom := q.Get("date_from")
 	dateTo   := q.Get("date_to")
+
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "EXPENSES_EXPORT_ACCOUNTANT",
+		EntityType: "expense_export",
+		NewData:    map[string]interface{}{"date_from": dateFrom, "date_to": dateTo},
+	})
 
 	args := []interface{}{bizID}
 	where := "WHERE e.business_id=$1 AND e.deleted_at IS NULL"

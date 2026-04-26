@@ -29,17 +29,30 @@ func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, audit *mi
 
 func (h *Handler) RegisterPayrollRoutes(r chi.Router) {
 	r.Route("/api/v1/payroll", func(r chi.Router) {
-		r.Get("/runs", h.ListPayRuns)
-		r.Post("/runs", h.CreatePayRun)
-		r.Get("/runs/{id}", h.GetPayRun)
-		r.Post("/runs/{id}/process", h.ProcessPayRun)
+		// Self-service: any authenticated tenant user. Handlers enforce
+		// caller-vs-target checks (e.g. employees see only their own payslips).
 		r.Get("/payslips", h.ListPayslips)
 		r.Get("/payslips/{id}/pdf", h.GeneratePayslipPDF)
-		r.Get("/superannuation", h.ListSuper)
 		r.Post("/leave-requests", h.CreateLeaveRequest)
 		r.Get("/leave-requests", h.ListLeaveRequests)
-		r.Post("/leave-requests/{id}/approve", h.ApproveLeave)
-		r.Post("/leave-requests/{id}/reject", h.RejectLeave)
+
+		// Manager+ reads: pay run summaries and super tracking are sensitive
+		// across the whole business and are restricted to manager and above.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireAtLeast("manager"))
+			r.Get("/runs", h.ListPayRuns)
+			r.Get("/runs/{id}", h.GetPayRun)
+			r.Get("/superannuation", h.ListSuper)
+		})
+
+		// Owner/Admin only: pay run mutations and leave approval/rejection.
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireOwnerOrAdmin())
+			r.Post("/runs", h.CreatePayRun)
+			r.Post("/runs/{id}/process", h.ProcessPayRun)
+			r.Post("/leave-requests/{id}/approve", h.ApproveLeave)
+			r.Post("/leave-requests/{id}/reject", h.RejectLeave)
+		})
 	})
 }
 
@@ -694,6 +707,18 @@ func (h *Handler) CreatePayRun(w http.ResponseWriter, r *http.Request) {
 		respond(w, 500, map[string]string{"error": "internal_error"})
 		return
 	}
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "PAYROLL_RUN_CREATED",
+		EntityType: "pay_run",
+		EntityID:   newID,
+		NewData: map[string]interface{}{
+			"period_start": req.PeriodStart,
+			"period_end":   req.PeriodEnd,
+			"pay_date":     req.PayDate,
+		},
+	})
 	respond(w, 201, map[string]interface{}{"id": newID, "status": "draft"})
 }
 
@@ -746,7 +771,9 @@ func (h *Handler) GetPayRun(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ProcessPayRun(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
+	runID, _ := uuid.Parse(id)
 	var periodStart, periodEnd string
 	err := h.db.QueryRow(r.Context(),
 		`SELECT period_start::TEXT, period_end::TEXT FROM pay_runs WHERE id=$1 AND business_id=$2 AND status='draft'`,
@@ -789,12 +816,35 @@ func (h *Handler) ProcessPayRun(w http.ResponseWriter, r *http.Request) {
 		 WHERE id=$1 AND business_id=$2`,
 		id, bizID, totalGross, totalGross*0.19, totalGross*0.81,
 	)
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "PAYROLL_RUN_PROCESSED",
+		EntityType: "pay_run",
+		EntityID:   runID,
+		NewData: map[string]interface{}{
+			"total_gross": totalGross,
+			"total_tax":   totalGross * 0.19,
+			"total_net":   totalGross * 0.81,
+		},
+	})
 	respond(w, 200, map[string]string{"status": "processed"})
 }
 
 func (h *Handler) ListPayslips(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	workerID := r.URL.Query().Get("worker_id")
+	// Non-elevated callers (worker, accountant, customer) can only see their own payslips.
+	// Manager+ may query for any worker in the tenant.
+	elevated := middleware.IsAtLeast(claims.Role, "manager")
+	if !elevated {
+		if workerID != "" && workerID != claims.UserID.String() {
+			respond(w, 403, map[string]string{"error": "forbidden"})
+			return
+		}
+		workerID = claims.UserID.String()
+	}
 	query := `SELECT ps.id, ps.worker_id, u.first_name||' '||u.last_name, ps.pay_run_id, ps.gross_pay, ps.tax_withheld, ps.net_pay, ps.super_amount, ps.period_start, ps.period_end, ps.created_at
 		 FROM payslips ps JOIN users u ON u.id=ps.worker_id WHERE ps.business_id=$1`
 	args := []interface{}{bizID}
@@ -830,6 +880,7 @@ func (h *Handler) ListPayslips(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) GeneratePayslipPDF(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
 	var psID, workerID, workerName string
 	var gross, tax, net, super float64
@@ -841,6 +892,10 @@ func (h *Handler) GeneratePayslipPDF(w http.ResponseWriter, r *http.Request) {
 	).Scan(&psID, &workerID, &workerName, &gross, &tax, &net, &super, &periodStart, &periodEnd)
 	if err != nil {
 		respond(w, 404, map[string]string{"error": "not_found"})
+		return
+	}
+	if !middleware.IsAtLeast(claims.Role, "manager") && workerID != claims.UserID.String() {
+		respond(w, 403, map[string]string{"error": "forbidden"})
 		return
 	}
 	respond(w, 200, map[string]interface{}{
@@ -900,6 +955,10 @@ func (h *Handler) CreateLeaveRequest(w http.ResponseWriter, r *http.Request) {
 	if workerID == "" {
 		workerID = claims.UserID.String()
 	}
+	if workerID != claims.UserID.String() && !middleware.IsAtLeast(claims.Role, "admin") {
+		respond(w, 403, map[string]string{"error": "forbidden"})
+		return
+	}
 	newID := uuid.New()
 	_, err := h.db.Exec(r.Context(),
 		`INSERT INTO leave_requests (id, business_id, worker_id, leave_type, start_date, end_date,
@@ -919,9 +978,15 @@ func (h *Handler) CreateLeaveRequest(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) ListLeaveRequests(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	q := r.URL.Query()
 	status := q.Get("status")
 	workerID := q.Get("worker_id")
+	// Non-elevated callers can only see their own leave requests; ignore any
+	// worker_id query param that doesn't match themselves.
+	if !middleware.IsAtLeast(claims.Role, "manager") {
+		workerID = claims.UserID.String()
+	}
 	query := `SELECT lr.id, lr.worker_id, u.first_name||' '||u.last_name, lr.leave_type, lr.start_date, lr.end_date, lr.days_count, lr.status, lr.created_at
 		 FROM leave_requests lr JOIN users u ON u.id=lr.worker_id WHERE lr.business_id=$1`
 	args := []interface{}{bizID}
@@ -966,6 +1031,7 @@ func (h *Handler) ApproveLeave(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
+	leaveID, _ := uuid.Parse(id)
 	_, err := h.db.Exec(r.Context(),
 		`UPDATE leave_requests SET status='approved', approved_by=$3, approved_at=NOW(), updated_at=NOW()
 		 WHERE id=$1 AND business_id=$2 AND status='pending'`,
@@ -975,12 +1041,21 @@ func (h *Handler) ApproveLeave(w http.ResponseWriter, r *http.Request) {
 		respond(w, 500, map[string]string{"error": "internal_error"})
 		return
 	}
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "LEAVE_REQUEST_APPROVED",
+		EntityType: "leave_request",
+		EntityID:   leaveID,
+	})
 	respond(w, 200, map[string]string{"status": "approved"})
 }
 
 func (h *Handler) RejectLeave(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
+	leaveID, _ := uuid.Parse(id)
 	var req struct {
 		Reason *string `json:"rejection_reason"`
 	}
@@ -994,6 +1069,14 @@ func (h *Handler) RejectLeave(w http.ResponseWriter, r *http.Request) {
 		respond(w, 500, map[string]string{"error": "internal_error"})
 		return
 	}
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "LEAVE_REQUEST_REJECTED",
+		EntityType: "leave_request",
+		EntityID:   leaveID,
+		NewData:    map[string]interface{}{"rejection_reason": req.Reason},
+	})
 	respond(w, 200, map[string]string{"status": "rejected"})
 }
 

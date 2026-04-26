@@ -199,6 +199,7 @@ func (h *Handler) GetTaxSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateTaxSettings(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	var req struct {
 		GSTRegistered *bool    `json:"gst_registered"`
 		GSTRate       *float64 `json:"gst_rate"`
@@ -218,6 +219,19 @@ func (h *Handler) UpdateTaxSettings(w http.ResponseWriter, r *http.Request) {
 		  updated_at=NOW()
 		 WHERE business_id=$1`,
 		bizID, req.GSTRegistered, req.GSTRate, req.FiscalYearEnd, req.BASFrequency)
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "BUSINESS_TAX_SETTINGS_UPDATED",
+		EntityType: "business_tax_settings",
+		EntityID:   bizID,
+		NewData: map[string]interface{}{
+			"gst_registered":  req.GSTRegistered,
+			"gst_rate":        req.GSTRate,
+			"fiscal_year_end": req.FiscalYearEnd,
+			"bas_frequency":   req.BASFrequency,
+		},
+	})
 	h.GetTaxSettings(w, r)
 }
 
@@ -298,6 +312,7 @@ func (h *Handler) GetPayrollSettings(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdatePayrollSettings(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	var req struct {
 		PayrollFrequency *string  `json:"payroll_frequency"`
 		PayDay           *int     `json:"pay_day"`
@@ -317,6 +332,19 @@ func (h *Handler) UpdatePayrollSettings(w http.ResponseWriter, r *http.Request) 
 		  updated_at=NOW()
 		 WHERE business_id=$1`,
 		bizID, req.PayrollFrequency, req.PayDay, req.SuperRate, req.DefaultWorkHours)
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "BUSINESS_PAYROLL_SETTINGS_UPDATED",
+		EntityType: "business_payroll_settings",
+		EntityID:   bizID,
+		NewData: map[string]interface{}{
+			"payroll_frequency":  req.PayrollFrequency,
+			"pay_day":            req.PayDay,
+			"super_rate":         req.SuperRate,
+			"default_work_hours": req.DefaultWorkHours,
+		},
+	})
 	h.GetPayrollSettings(w, r)
 }
 
@@ -375,6 +403,7 @@ func (h *Handler) GetCompliance(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateCompliance(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
 	var req struct {
 		WorkSafeNumber *string `json:"worksafe_number"`
 		TFN            *string `json:"tfn"`
@@ -395,6 +424,28 @@ func (h *Handler) UpdateCompliance(w http.ResponseWriter, r *http.Request) {
 		   licence_class=COALESCE($5,business_compliance_details.licence_class),
 		   updated_at=NOW()`,
 		bizID, req.WorkSafeNumber, req.TFN, req.ACN, req.LicenceClass)
+	// Mask the actual TFN/ACN values in audit; only record which fields changed.
+	changed := map[string]bool{}
+	if req.WorkSafeNumber != nil {
+		changed["worksafe_number"] = true
+	}
+	if req.TFN != nil {
+		changed["tfn"] = true
+	}
+	if req.ACN != nil {
+		changed["acn"] = true
+	}
+	if req.LicenceClass != nil {
+		changed["licence_class"] = true
+	}
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     "BUSINESS_COMPLIANCE_UPDATED",
+		EntityType: "business_compliance_details",
+		EntityID:   bizID,
+		NewData:    map[string]interface{}{"fields_changed": changed},
+	})
 	h.GetCompliance(w, r)
 }
 

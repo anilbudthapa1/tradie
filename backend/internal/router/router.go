@@ -164,18 +164,14 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 			})
 		})
 
-		// Customers
+		// Customers — reads + field-side creates open; mutations + destroys are manager+
 		custH := customers.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/customers", func(r chi.Router) {
 			r.Get("/", custH.List)
 			r.Post("/", custH.Create)
 			r.Get("/{id}", custH.Get)
-			r.Put("/{id}", custH.Update)
-			r.Delete("/{id}", custH.Delete)
 			r.Get("/{id}/addresses", custH.GetAddresses)
 			r.Post("/{id}/addresses", custH.AddAddress)
-			r.Put("/{id}/addresses/{aid}", custH.UpdateAddress)
-			r.Delete("/{id}/addresses/{aid}", custH.DeleteAddress)
 			r.Get("/{id}/contacts", custH.GetContacts)
 			r.Post("/{id}/contacts", custH.AddContact)
 			r.Get("/{id}/notes", custH.GetNotes)
@@ -183,17 +179,21 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 			r.Get("/{id}/jobs", custH.GetJobs)
 			r.Get("/{id}/quotes", custH.GetQuotes)
 			r.Get("/{id}/invoices", custH.GetInvoices)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Put("/{id}", custH.Update)
+				r.Delete("/{id}", custH.Delete)
+				r.Put("/{id}/addresses/{aid}", custH.UpdateAddress)
+				r.Delete("/{id}/addresses/{aid}", custH.DeleteAddress)
+			})
 		})
 
-		// Jobs
+		// Jobs — reads + field-worker actions open; create/update/delete/assign manager+
 		jobH := jobs.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/jobs", func(r chi.Router) {
 			r.Get("/", jobH.List)
-			r.Post("/", jobH.Create)
 			r.Get("/{id}", jobH.Get)
-			r.Put("/{id}", jobH.Update)
-			r.Delete("/{id}", jobH.Delete)
-			r.Post("/{id}/assign", jobH.Assign)
 			r.Post("/{id}/status", jobH.UpdateStatus)
 			r.Get("/{id}/notes", jobH.GetNotes)
 			r.Post("/{id}/notes", jobH.AddNote)
@@ -206,30 +206,46 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 			r.Get("/calendar", jobH.Calendar)
 			r.Get("/schedule/daily", jobH.DailySchedule)
 			r.Get("/schedule/weekly", jobH.WeeklySchedule)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Post("/", jobH.Create)
+				r.Put("/{id}", jobH.Update)
+				r.Delete("/{id}", jobH.Delete)
+				r.Post("/{id}/assign", jobH.Assign)
+			})
 		})
 
-		// Scheduler
+		// Scheduler — conflict + ETA queries open; rescheduling + route planning manager+
 		schedH := scheduler.NewHandler(cfg, db, rdb, log)
 		r.Route("/api/v1/scheduler", func(r chi.Router) {
 			r.Get("/conflicts", schedH.CheckConflicts)
-			r.Post("/drag-drop", schedH.DragDrop)
-			r.Get("/route", schedH.Route)
 			r.Get("/eta/{job_id}", schedH.ETA)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Post("/drag-drop", schedH.DragDrop)
+				r.Get("/route", schedH.Route)
+			})
 		})
 
-		// Quotes
+		// Quotes — reads + PDF open; mutations, send, conversion, template create manager+
 		quoteH := quotes.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/quotes", func(r chi.Router) {
 			r.Get("/", quoteH.List)
-			r.Post("/", quoteH.Create)
 			r.Get("/{id}", quoteH.Get)
-			r.Put("/{id}", quoteH.Update)
-			r.Delete("/{id}", quoteH.Delete)
-			r.Post("/{id}/send", quoteH.Send)
-			r.Post("/{id}/convert", quoteH.ConvertToJob)
 			r.Get("/{id}/pdf", quoteH.GeneratePDF)
 			r.Get("/templates", quoteH.ListTemplates)
-			r.Post("/templates", quoteH.CreateTemplate)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Post("/", quoteH.Create)
+				r.Put("/{id}", quoteH.Update)
+				r.Delete("/{id}", quoteH.Delete)
+				r.Post("/{id}/send", quoteH.Send)
+				r.Post("/{id}/convert", quoteH.ConvertToJob)
+				r.Post("/templates", quoteH.CreateTemplate)
+			})
 		})
 		// Public quote approval (customer-facing, no auth)
 		r.Get("/api/v1/public/quotes/{token}", quoteH.PublicGet)
@@ -240,56 +256,70 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 		searchH := search.NewHandler(cfg, db, log)
 		r.Get("/api/v1/search", searchH.Search)
 
-		// Invoices
+		// Invoices — reads + PDF + receipt open; financial mutations manager+; recurring trigger admin+
 		invH := invoices.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/invoices", func(r chi.Router) {
 			r.Get("/", invH.List)
-			r.Post("/", invH.Create)
 			r.Get("/{id}", invH.Get)
-			r.Put("/{id}", invH.Update)
-			r.Delete("/{id}", invH.Delete)
-			r.Post("/{id}/send", invH.Send)
 			r.Get("/{id}/pdf", invH.GeneratePDF)
-			r.Post("/{id}/payment", invH.RecordPayment)
-			r.Post("/{id}/credit-note", invH.IssueCreditNote)
 			r.Get("/{id}/receipt", invH.GetReceipt)
-			r.Post("/{id}/payment-link", invH.CreatePaymentLink)
-			// Recurring invoice rules
 			r.Get("/recurring", invH.ListRecurringRules)
-			r.Post("/recurring", invH.CreateRecurringRule)
-			r.Delete("/recurring/{id}", invH.DeleteRecurringRule)
-			// Internal: process due recurring invoices (restrict to admin/service role in production)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Post("/", invH.Create)
+				r.Put("/{id}", invH.Update)
+				r.Delete("/{id}", invH.Delete)
+				r.Post("/{id}/send", invH.Send)
+				r.Post("/{id}/payment", invH.RecordPayment)
+				r.Post("/{id}/credit-note", invH.IssueCreditNote)
+				r.Post("/{id}/payment-link", invH.CreatePaymentLink)
+				r.Post("/recurring", invH.CreateRecurringRule)
+				r.Delete("/recurring/{id}", invH.DeleteRecurringRule)
+			})
+
+			// Internal: process due recurring invoices — owner/admin only (until cron worker exists)
 			r.Group(func(r chi.Router) {
 				r.Use(middleware.RequireOwnerOrAdmin())
 				r.Post("/recurring/process", invH.ProcessDueRecurring)
 			})
 		})
 
-		// Payments
+		// Payments — financial data, manager+ only
 		payH := payments.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/payments", func(r chi.Router) {
+			r.Use(middleware.RequireAtLeast("manager"))
 			r.Get("/", payH.List)
 			r.Get("/{id}", payH.Get)
 		})
 
-		// Expenses
+		// Expenses — submission open; updates manager+; delete + accountant export admin+
 		expH := expenses.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/expenses", func(r chi.Router) {
 			r.Get("/", expH.List)
 			r.Post("/", expH.Create)
 			r.Get("/summary", expH.GetSummary)
-			r.Get("/export/accountant", expH.ExportAccountant)
 			r.Post("/scan-receipt", expH.ScanReceipt)
 			r.Get("/{id}", expH.Get)
-			r.Patch("/{id}", expH.Update)
-			r.Put("/{id}", expH.Update)
-			r.Delete("/{id}", expH.Delete)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Patch("/{id}", expH.Update)
+				r.Put("/{id}", expH.Update)
+			})
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOwnerOrAdmin())
+				r.Delete("/{id}", expH.Delete)
+				r.Get("/export/accountant", expH.ExportAccountant)
+			})
 		})
 
 		// Payroll
 		workerH.RegisterPayrollRoutes(r)
 
-		// Safety
+		// Safety — field submissions (incidents, PPE, checklists) open;
+		// SWMS/risk-assessment authoring + compliance management manager+
 		safetyH := safety.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/safety", func(r chi.Router) {
 			r.Get("/checklists", safetyH.ListChecklists)
@@ -297,21 +327,25 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 			r.Get("/checklists/{id}", safetyH.GetChecklist)
 			r.Post("/checklists/{id}/complete", safetyH.CompleteChecklist)
 			r.Get("/swms", safetyH.ListSWMS)
-			r.Post("/swms", safetyH.CreateSWMS)
 			r.Get("/swms/{id}", safetyH.GetSWMS)
 			r.Get("/swms/{id}/pdf", safetyH.GenerateSWMSPDF)
 			r.Get("/incidents", safetyH.ListIncidents)
 			r.Post("/incidents", safetyH.CreateIncident)
 			r.Get("/incidents/{id}", safetyH.GetIncident)
-			r.Put("/incidents/{id}", safetyH.UpdateIncident)
 			r.Get("/risk-assessments", safetyH.ListRiskAssessments)
-			r.Post("/risk-assessments", safetyH.CreateRiskAssessment)
 			r.Get("/compliance", safetyH.ListCompliance)
-			r.Post("/compliance", safetyH.AddCompliance)
-			r.Put("/compliance/{id}", safetyH.UpdateCompliance)
-			r.Delete("/compliance/{id}", safetyH.DeleteCompliance)
 			r.Get("/ppe/{job_id}", safetyH.GetPPEChecklist)
 			r.Post("/ppe", safetyH.SubmitPPEChecklist)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Put("/incidents/{id}", safetyH.UpdateIncident)
+				r.Post("/swms", safetyH.CreateSWMS)
+				r.Post("/risk-assessments", safetyH.CreateRiskAssessment)
+				r.Post("/compliance", safetyH.AddCompliance)
+				r.Put("/compliance/{id}", safetyH.UpdateCompliance)
+				r.Delete("/compliance/{id}", safetyH.DeleteCompliance)
+			})
 		})
 
 		// Tasks / Reminders
@@ -326,24 +360,35 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 			r.Delete("/{id}", taskH.Delete)
 		})
 
-		// Reports
-		repH := reports.NewHandler(cfg, db, log)
+		// Reports — dashboard open; operational reports manager+; financial reports admin+
+		// NOTE: mobile dashboard widgets that show revenue/unpaid will 403 for non-elevated
+		// users — UI must conditionally render based on caller role.
+		repH := reports.NewHandler(cfg, db, log, audit)
 		r.Route("/api/v1/reports", func(r chi.Router) {
 			r.Get("/dashboard", repH.Dashboard)
-			r.Get("/revenue", repH.Revenue)
-			r.Get("/jobs", repH.Jobs)
-			r.Get("/workers", repH.WorkerPerformance)
-			r.Get("/unpaid-invoices", repH.UnpaidInvoices)
-			r.Get("/customer-retention", repH.CustomerRetention)
-			r.Get("/income-expense", repH.IncomeExpense)
-			r.Get("/gst-bas", repH.GSTBAS)
-			r.Get("/quarterly-tax", repH.QuarterlyTax)
-			r.Get("/export/csv", repH.ExportCSV)
-			r.Get("/export/pdf", repH.ExportPDF)
-			r.Get("/export/year-end", repH.YearEnd)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireAtLeast("manager"))
+				r.Get("/jobs", repH.Jobs)
+				r.Get("/workers", repH.WorkerPerformance)
+				r.Get("/customer-retention", repH.CustomerRetention)
+				r.Get("/export/csv", repH.ExportCSV)
+				r.Get("/export/pdf", repH.ExportPDF)
+			})
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOwnerOrAdmin())
+				r.Get("/revenue", repH.Revenue)
+				r.Get("/unpaid-invoices", repH.UnpaidInvoices)
+				r.Get("/income-expense", repH.IncomeExpense)
+				r.Get("/gst-bas", repH.GSTBAS)
+				r.Get("/quarterly-tax", repH.QuarterlyTax)
+				r.Get("/export/year-end", repH.YearEnd)
+			})
 		})
 
-		// Notifications
+		// Notifications — user-facing inbox + own-preferences open;
+		// template editing + delivery log access admin+
 		notifH := notifications.NewHandler(cfg, db, rdb, log)
 		r.Route("/api/v1/notifications", func(r chi.Router) {
 			r.Get("/", notifH.List)
@@ -352,9 +397,13 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 			r.Get("/preferences", notifH.GetPreferences)
 			r.Put("/preferences", notifH.UpdatePreferences)
 			r.Patch("/preferences", notifH.UpdatePreferences)
-			r.Get("/templates", notifH.ListTemplates)
-			r.Put("/templates/{id}", notifH.UpdateTemplate)
-			r.Get("/delivery-logs", notifH.DeliveryLogs)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOwnerOrAdmin())
+				r.Get("/templates", notifH.ListTemplates)
+				r.Put("/templates/{id}", notifH.UpdateTemplate)
+				r.Get("/delivery-logs", notifH.DeliveryLogs)
+			})
 		})
 
 		// Subscription — reads available to all; billing actions owner only
@@ -371,13 +420,18 @@ func New(cfg *config.Config, db *pgxpool.Pool, rdb *redis.Client, log *zap.Logge
 			})
 		})
 
-		// Files
+		// Files — list + upload + get open (uploader-vs-caller still TODO at handler level);
+		// destructive delete admin+
 		fileH := files.NewHandler(cfg, db, log)
 		r.Route("/api/v1/files", func(r chi.Router) {
 			r.Get("/", fileH.ListForEntity)
 			r.Post("/upload", fileH.Upload)
 			r.Get("/{id}", fileH.Get)
-			r.Delete("/{id}", fileH.Delete)
+
+			r.Group(func(r chi.Router) {
+				r.Use(middleware.RequireOwnerOrAdmin())
+				r.Delete("/{id}", fileH.Delete)
+			})
 		})
 
 		// Settings

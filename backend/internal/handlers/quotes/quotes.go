@@ -147,9 +147,16 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 			*req.ValidUntil, id, bizID)
 	}
 	if req.DiscountAmount != nil {
+		claims := middleware.ClaimsFromCtx(r.Context())
+		var subtotal float64
+		_ = h.db.QueryRow(r.Context(),
+			`SELECT COALESCE(subtotal, 0) FROM quotes WHERE id=$1 AND business_id=$2`,
+			id, bizID,
+		).Scan(&subtotal)
+		capped := clampDiscount(claims.Role, subtotal, *req.DiscountAmount)
 		_, _ = h.db.Exec(r.Context(),
 			`UPDATE quotes SET discount_amount=$1, updated_at=NOW() WHERE id=$2 AND business_id=$3`,
-			*req.DiscountAmount, id, bizID)
+			capped, id, bizID)
 	}
 
 	// Recalculate totals from line_items
@@ -725,7 +732,7 @@ func (h *Handler) AddLineItem(w http.ResponseWriter, r *http.Request) {
 		req.Quantity = 1
 	}
 	if req.TaxRate == 0 {
-		req.TaxRate = 0.1 // Default 10% GST
+		req.TaxRate = h.businessGSTRate(r, bizID)
 	}
 
 	// Verify quote belongs to business and is editable
@@ -858,9 +865,8 @@ func (h *Handler) ApplyDiscount(w http.ResponseWriter, r *http.Request) {
 		}
 		discountAmount = math.Round(currentSubtotal*pct/100*100) / 100
 	}
-	if discountAmount < 0 {
-		discountAmount = 0
-	}
+	claims := middleware.ClaimsFromCtx(r.Context())
+	discountAmount = clampDiscount(claims.Role, currentSubtotal, discountAmount)
 
 	_, err = h.db.Exec(r.Context(),
 		`UPDATE quotes SET discount_amount=$1, updated_at=NOW() WHERE id=$2 AND business_id=$3`,
@@ -881,6 +887,46 @@ func (h *Handler) ApplyDiscount(w http.ResponseWriter, r *http.Request) {
 	).Scan(&q.ID, &q.BusinessID, &q.QuoteNumber, &q.Status, &q.CustomerID, &q.Title,
 		&q.Subtotal, &q.DiscountAmount, &q.GSTAmount, &q.Total, &q.ValidUntil, &q.CreatedAt, &q.UpdatedAt)
 	respond(w, 200, q)
+}
+
+// businessGSTRate returns the tenant's GST rate as a decimal (0.10 for 10%).
+// Falls back to 0.10 if no business_tax_settings row exists for the tenant.
+func (h *Handler) businessGSTRate(r *http.Request, bizID interface{}) float64 {
+	var pct float64
+	err := h.db.QueryRow(r.Context(),
+		`SELECT COALESCE(gst_rate, 10.00) FROM business_tax_settings WHERE business_id=$1`,
+		bizID,
+	).Scan(&pct)
+	if err != nil {
+		return 0.10
+	}
+	return pct / 100.0
+}
+
+// clampDiscount caps a requested discount amount to a fraction of subtotal
+// based on caller role: owner up to 100%, admin up to 50%, manager up to 25%,
+// any other role 0%. Negative requested amounts are coerced to zero.
+// Server-side enforcement so frontend cannot apply a 100% discount.
+func clampDiscount(role string, subtotal, requested float64) float64 {
+	if requested < 0 {
+		return 0
+	}
+	var maxFrac float64
+	switch role {
+	case "owner":
+		maxFrac = 1.0
+	case "admin":
+		maxFrac = 0.5
+	case "manager":
+		maxFrac = 0.25
+	default:
+		maxFrac = 0
+	}
+	maxAllowed := subtotal * maxFrac
+	if requested > maxAllowed {
+		return maxAllowed
+	}
+	return requested
 }
 
 // ── recalcTotals ──────────────────────────────────────────────
