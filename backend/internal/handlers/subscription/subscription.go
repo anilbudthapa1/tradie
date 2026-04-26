@@ -298,6 +298,25 @@ func (h *Handler) handleInvoicePaymentComplete(r *http.Request, sess *stripe.Che
 			zap.String("session_id", sess.ID))
 		return
 	}
+
+	// Verify the invoice actually belongs to the metadata's business_id
+	// before writing anything. Without this, a forged session (or one
+	// where metadata is mismatched) could create a phantom invoice_payments
+	// row for an unowned invoice.
+	var ownedExists bool
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM invoices
+		                 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+		invoiceID, bizID,
+	).Scan(&ownedExists)
+	if !ownedExists {
+		h.log.Warn("stripe invoice checkout for unowned invoice",
+			zap.String("session_id", sess.ID),
+			zap.String("invoice_id", invoiceID),
+			zap.String("metadata_business_id", bizID))
+		return
+	}
+
 	amount := float64(sess.AmountTotal) / 100.0
 
 	// Idempotency: bail if we've already recorded this Stripe payment.
@@ -356,32 +375,66 @@ func (h *Handler) handleInvoicePaymentComplete(r *http.Request, sess *stripe.Che
 }
 
 func (h *Handler) handleSubscriptionUpdated(r *http.Request, sub *stripe.Subscription) {
+	// business_id is required: the WHERE filters on both stripe_subscription_id
+	// AND business_id so a forged event can't mutate another tenant's row even
+	// if the signing key were ever leaked.
 	bizID := sub.Metadata["business_id"]
 	if bizID == "" {
-		return
+		// Recover bizID from the row itself rather than blindly trusting metadata.
+		bizID = h.bizIDForStripeSub(r, sub.ID)
+		if bizID == "" {
+			h.log.Warn("stripe sub.updated for unknown subscription", zap.String("sub_id", sub.ID))
+			return
+		}
 	}
 	_, _ = h.db.Exec(r.Context(),
 		`UPDATE subscriptions SET status=$2, cancel_at_period_end=$3,
 		  current_period_start=$4, current_period_end=$5, updated_at=NOW()
-		 WHERE stripe_subscription_id=$1`,
+		 WHERE stripe_subscription_id=$1 AND business_id=$6`,
 		sub.ID, string(sub.Status), sub.CancelAtPeriodEnd,
 		time.Unix(sub.CurrentPeriodStart, 0),
-		time.Unix(sub.CurrentPeriodEnd, 0))
+		time.Unix(sub.CurrentPeriodEnd, 0),
+		bizID)
 }
 
 func (h *Handler) handleSubscriptionDeleted(r *http.Request, sub *stripe.Subscription) {
+	bizID := sub.Metadata["business_id"]
+	if bizID == "" {
+		bizID = h.bizIDForStripeSub(r, sub.ID)
+		if bizID == "" {
+			return
+		}
+	}
 	_, _ = h.db.Exec(r.Context(),
 		`UPDATE subscriptions SET status='canceled', canceled_at=NOW(), updated_at=NOW()
-		 WHERE stripe_subscription_id=$1`, sub.ID)
+		 WHERE stripe_subscription_id=$1 AND business_id=$2`, sub.ID, bizID)
 }
 
 func (h *Handler) handlePaymentFailed(r *http.Request, inv *stripe.Invoice) {
 	if inv.Subscription == nil {
 		return
 	}
+	bizID := h.bizIDForStripeSub(r, inv.Subscription.ID)
+	if bizID == "" {
+		return
+	}
 	_, _ = h.db.Exec(r.Context(),
 		`UPDATE subscriptions SET status='past_due', updated_at=NOW()
-		 WHERE stripe_subscription_id=$1`, inv.Subscription.ID)
+		 WHERE stripe_subscription_id=$1 AND business_id=$2`,
+		inv.Subscription.ID, bizID)
+}
+
+// bizIDForStripeSub looks up the business_id for a given Stripe subscription
+// ID by reading our own subscriptions table. Returns "" if not found —
+// callers should treat that as "unknown subscription, skip" rather than
+// processing the event.
+func (h *Handler) bizIDForStripeSub(r *http.Request, stripeSubID string) string {
+	var bizID string
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT business_id::text FROM subscriptions WHERE stripe_subscription_id=$1`,
+		stripeSubID,
+	).Scan(&bizID)
+	return bizID
 }
 
 func (h *Handler) getPlanSlugFromPriceID(r *http.Request, priceID string) string {

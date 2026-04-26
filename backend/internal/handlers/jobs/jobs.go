@@ -93,6 +93,11 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		req.Priority = "normal"
 	}
 
+	if req.CustomerID != nil && !h.customerInTenant(r, *req.CustomerID, bizID) {
+		respond(w, 404, map[string]string{"error": "customer_not_found"})
+		return
+	}
+
 	var nextNum int
 	_ = h.db.QueryRow(r.Context(), `SELECT COUNT(*)+1001 FROM jobs WHERE business_id=$1`, bizID).Scan(&nextNum)
 	jobNumber := fmt.Sprintf("JOB-%04d", nextNum)
@@ -162,6 +167,11 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.CustomerID != nil && !h.customerInTenant(r, *req.CustomerID, bizID) {
+		respond(w, 404, map[string]string{"error": "customer_not_found"})
+		return
+	}
+
 	var j models.Job
 	err := h.db.QueryRow(r.Context(),
 		`UPDATE jobs
@@ -197,7 +207,20 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	jobID := chi.URLParam(r, "id")
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+
+	// Verify the job belongs to this tenant before any inserts.
+	if !h.jobInTenant(r, jobID, bizID) {
+		respond(w, 404, map[string]string{"error": "job_not_found"})
+		return
+	}
+
 	for _, wid := range req.WorkerIDs {
+		// Skip workers that don't belong to this tenant rather than 404
+		// the whole batch — matches the existing ON CONFLICT DO NOTHING
+		// "best effort" semantics.
+		if !h.workerInTenant(r, wid, bizID) {
+			continue
+		}
 		_, _ = h.db.Exec(r.Context(),
 			`INSERT INTO job_assignments (job_id, business_id, worker_id) VALUES ($1,$2,$3) ON CONFLICT (job_id, worker_id) DO NOTHING`,
 			jobID, bizID, wid)
@@ -762,4 +785,41 @@ func nullStr(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+// ── tenant ownership helpers ───────────────────────────────────
+//
+// Cheap EXISTS lookups used to verify that an ID supplied via
+// request body / URL belongs to the caller's business before any
+// INSERT/UPDATE references it. Without these, a caller could
+// poison their own joins by referencing another tenant's row.
+
+func (h *Handler) customerInTenant(r *http.Request, customerID, bizID interface{}) bool {
+	var ok bool
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM customers
+		                 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+		customerID, bizID,
+	).Scan(&ok)
+	return ok
+}
+
+func (h *Handler) jobInTenant(r *http.Request, jobID, bizID interface{}) bool {
+	var ok bool
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM jobs
+		                 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+		jobID, bizID,
+	).Scan(&ok)
+	return ok
+}
+
+func (h *Handler) workerInTenant(r *http.Request, workerID, bizID interface{}) bool {
+	var ok bool
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM users
+		                 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+		workerID, bizID,
+	).Scan(&ok)
+	return ok
 }

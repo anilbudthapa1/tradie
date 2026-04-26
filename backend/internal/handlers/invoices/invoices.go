@@ -142,6 +142,32 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verify customer (and optional job) belong to caller's tenant before
+	// any write — otherwise an attacker could pollute their own invoices
+	// with cross-tenant references that leak via cascading reads.
+	var customerOK bool
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT EXISTS(SELECT 1 FROM customers
+		                 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+		req.CustomerID, bizID,
+	).Scan(&customerOK)
+	if !customerOK {
+		respond(w, 404, map[string]string{"error": "customer_not_found"})
+		return
+	}
+	if req.JobID != "" {
+		var jobOK bool
+		_ = h.db.QueryRow(r.Context(),
+			`SELECT EXISTS(SELECT 1 FROM jobs
+			                 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+			req.JobID, bizID,
+		).Scan(&jobOK)
+		if !jobOK {
+			respond(w, 404, map[string]string{"error": "job_not_found"})
+			return
+		}
+	}
+
 	// Calculate totals
 	var subtotal, gstAmount float64
 	for _, li := range req.LineItems {
