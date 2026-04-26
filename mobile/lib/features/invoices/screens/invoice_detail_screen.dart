@@ -27,7 +27,7 @@ class InvoiceDetailScreen extends ConsumerWidget {
           const Icon(Iconsax.receipt, size: 18, color: TradieColors.navy),
           const SizedBox(width: 8),
           detail.when(
-            data: (d) => Text((d['invoice'] as Map?)?.get('invoice_number') ?? 'Invoice'),
+            data: (d) => Text((d['invoice'] as Map?)?['invoice_number'] ?? 'Invoice'),
             loading: () => const Text('Invoice'),
             error: (_, __) => const Text('Invoice'),
           ),

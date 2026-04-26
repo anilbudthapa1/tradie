@@ -41,7 +41,7 @@ dependencies:
   reactive_forms: ^17.0.1
 
   # Date/time
-  intl: ^0.19.0
+  intl: ^0.20.2
 
   # PDF & Files
   open_file: ^3.3.2
@@ -85,11 +85,12 @@ flutter:
     - assets/images/
     - assets/icons/
   fonts:
+    # Apple ladder uses 300 / 400 / 600 / 700 only — weight 500 is
+    # deliberately absent. Inter-Light.ttf is not bundled, so weight
+    # 300 falls back to the closest available weight at runtime.
     - family: Inter
       fonts:
         - asset: assets/fonts/Inter-Regular.ttf
-        - asset: assets/fonts/Inter-Medium.ttf
-          weight: 500
         - asset: assets/fonts/Inter-SemiBold.ttf
           weight: 600
         - asset: assets/fonts/Inter-Bold.ttf

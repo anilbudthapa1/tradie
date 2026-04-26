@@ -5,7 +5,7 @@ import 'package:iconsax_flutter/iconsax_flutter.dart';
 
 import '../../../core/utils/theme.dart';
 import '../../../core/providers/auth_provider.dart';
-import '../../../core/widgets/tradie_button.dart';
+import '../../../core/widgets/apple_pill_button.dart';
 import '../../../core/widgets/tradie_text_field.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -35,6 +35,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       _emailCtrl.text.trim(),
       _passCtrl.text,
     );
+    if (!mounted) return;
     final state = ref.read(authNotifierProvider);
     state.when(
       data: (user) {
@@ -50,100 +51,151 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
     return Scaffold(
       backgroundColor: TradieColors.white,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 48),
-              // Logo
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: TradieColors.electricBlue,
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Iconsax.briefcase, color: Colors.white, size: 28),
-              ),
-              const SizedBox(height: 32),
-              Text('Welcome back', style: Theme.of(context).textTheme.displayMedium),
-              const SizedBox(height: 8),
-              Text('Sign in to your Tradie account', style: Theme.of(context).textTheme.bodyLarge?.copyWith(color: TradieColors.grey600)),
-              const SizedBox(height: 40),
-
-              if (_error != null) ...[
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: MediaQuery.of(context).size.height -
+                  MediaQuery.of(context).padding.vertical,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 96),
+                // Logo mark
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  width: 56,
+                  height: 56,
                   decoration: BoxDecoration(
-                    color: TradieColors.alertRed.withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: TradieColors.alertRed.withOpacity(0.3)),
+                    color: TradieColors.electricBlue,
+                    borderRadius: BorderRadius.circular(18),
                   ),
-                  child: Row(children: [
-                    const Icon(Iconsax.warning_2, color: TradieColors.alertRed, size: 18),
-                    const SizedBox(width: 8),
-                    Text(_error!, style: const TextStyle(color: TradieColors.alertRed, fontSize: 14)),
-                  ]),
+                  child: const Icon(
+                    Iconsax.briefcase,
+                    color: Colors.white,
+                    size: 28,
+                  ),
                 ),
-                const SizedBox(height: 20),
+                const SizedBox(height: 64),
+                Text(
+                  'Sign in.',
+                  style: tt.displayMedium?.copyWith(
+                    color: TradieColors.charcoal,
+                    letterSpacing: -0.4,
+                    height: 1.10,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Use your Tradie ID to access the workspace.',
+                  style: tt.headlineLarge?.copyWith(
+                    color: TradieColors.grey600,
+                    height: 1.14,
+                  ),
+                ),
+                const SizedBox(height: 64),
+                TradieTextField(
+                  controller: _emailCtrl,
+                  label: 'Email address',
+                  hint: 'you@business.com.au',
+                  keyboardType: TextInputType.emailAddress,
+                ),
+                const SizedBox(height: 16),
+                TradieTextField(
+                  controller: _passCtrl,
+                  label: 'Password',
+                  hint: 'Enter your password',
+                  obscureText: _obscure,
+                  suffixIcon: GestureDetector(
+                    onTap: () => setState(() => _obscure = !_obscure),
+                    child: Icon(
+                      _obscure ? Iconsax.eye_slash : Iconsax.eye,
+                      size: 20,
+                      color: TradieColors.grey400,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton(
+                    onPressed: () => context.go('/auth/forgot-password'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: TradieColors.electricBlue,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text(
+                      'Forgot password?',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
+                        color: TradieColors.electricBlue,
+                      ),
+                    ),
+                  ),
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    _error!,
+                    style: const TextStyle(
+                      color: TradieColors.alertRed,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                      height: 1.43,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 32),
+                ApplePillButton(
+                  label: 'Sign in',
+                  primary: true,
+                  loading: _loading,
+                  onPressed: _login,
+                  width: double.infinity,
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Text(
+                      "Don't have an account? ",
+                      style: TextStyle(
+                        color: TradieColors.grey600,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w400,
+                      ),
+                    ),
+                    TextButton(
+                      onPressed: () => context.go('/auth/register'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: TradieColors.electricBlue,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 2),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      child: const Text(
+                        'Create one',
+                        style: TextStyle(
+                          color: TradieColors.electricBlue,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 48),
               ],
-
-              TradieTextField(
-                controller: _emailCtrl,
-                label: 'Email address',
-                hint: 'you@business.com.au',
-                keyboardType: TextInputType.emailAddress,
-                prefixIcon: Iconsax.sms,
-              ),
-              const SizedBox(height: 16),
-              TradieTextField(
-                controller: _passCtrl,
-                label: 'Password',
-                hint: '••••••••',
-                obscureText: _obscure,
-                prefixIcon: Iconsax.lock,
-                suffixIcon: GestureDetector(
-                  onTap: () => setState(() => _obscure = !_obscure),
-                  child: Icon(_obscure ? Iconsax.eye_slash : Iconsax.eye, size: 20, color: TradieColors.grey400),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Align(
-                alignment: Alignment.centerRight,
-                child: TextButton(
-                  onPressed: () => context.go('/auth/forgot-password'),
-                  child: const Text('Forgot password?', style: TextStyle(color: TradieColors.electricBlue, fontWeight: FontWeight.w600)),
-                ),
-              ),
-              const SizedBox(height: 24),
-              TradieButton(
-                label: 'Sign in',
-                loading: _loading,
-                onPressed: _login,
-              ),
-              const SizedBox(height: 16),
-              OutlinedButton.icon(
-                onPressed: () {},
-                icon: const Icon(Iconsax.finger_cricle, size: 20),
-                label: const Text('Sign in with Passkey'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(double.infinity, 52),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-              const SizedBox(height: 32),
-              Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                const Text("Don't have an account? ", style: TextStyle(color: TradieColors.grey600)),
-                GestureDetector(
-                  onTap: () => context.go('/auth/register'),
-                  child: const Text('Sign up free', style: TextStyle(color: TradieColors.electricBlue, fontWeight: FontWeight.w600)),
-                ),
-              ]),
-            ],
+            ),
           ),
         ),
       ),

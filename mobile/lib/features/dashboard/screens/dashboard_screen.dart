@@ -5,11 +5,16 @@ import 'package:iconsax_flutter/iconsax_flutter.dart';
 
 import '../../../core/utils/theme.dart';
 import '../../../core/providers/auth_provider.dart';
+import '../../../core/widgets/apple_card.dart';
+import '../../../core/widgets/apple_pill_button.dart';
+import '../../../core/widgets/apple_tile.dart';
 import '../providers/dashboard_provider.dart';
-import '../widgets/kpi_card.dart';
-import '../widgets/today_jobs_widget.dart';
-import '../widgets/activity_feed_widget.dart';
 
+/// Apple-grammar dashboard.
+///
+/// A scrolling stack of full-bleed tiles that alternate light → dark → light
+/// → dark → light → parchment. No padding, no shadows, no chrome — the
+/// colour change is the divider.
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
 
@@ -20,218 +25,134 @@ class DashboardScreen extends ConsumerWidget {
     final firstName = auth.asData?.value?['first_name'] as String? ?? '';
 
     return Scaffold(
-      backgroundColor: TradieColors.grey50,
+      backgroundColor: TradieColors.white,
       body: RefreshIndicator(
         onRefresh: () async => ref.invalidate(dashboardStatsProvider),
-        child: CustomScrollView(
-          slivers: [
-            // ── App bar ───────────────────────────────────────────
-            SliverAppBar(
-              floating: true,
-              snap: true,
-              backgroundColor: TradieColors.white,
-              elevation: 0,
-              titleSpacing: 16,
-              title: Row(children: [
-                Container(
-                  width: 36, height: 36,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(colors: [TradieColors.electricBlue, Color(0xFF3B82F6)]),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: const Icon(Iconsax.briefcase, color: TradieColors.white, size: 18),
-                ),
-                const SizedBox(width: 10),
-                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(
-                    firstName.isNotEmpty ? 'Hi, $firstName 👋' : 'Dashboard',
-                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: TradieColors.navy),
-                  ),
-                  Text(_todayDate(),
-                    style: const TextStyle(fontSize: 11, color: TradieColors.grey400, fontWeight: FontWeight.w400)),
-                ]),
-              ]),
-              actions: [
-                // Unread badge
-                stats.when(
-                  data: (d) {
-                    final tasksDue = d['tasks_due'] as int? ?? 0;
-                    return tasksDue > 0
-                        ? IconButton(
-                            onPressed: () => context.push('/tasks'),
-                            icon: Badge(
-                              label: Text('$tasksDue'),
-                              child: const Icon(Iconsax.task_square, color: TradieColors.charcoal),
-                            ),
-                          )
-                        : IconButton(
-                            onPressed: () => context.push('/tasks'),
-                            icon: const Icon(Iconsax.task_square, color: TradieColors.charcoal),
-                          );
-                  },
-                  loading: () => const SizedBox(width: 48),
-                  error: (_, __) => const SizedBox(width: 48),
-                ),
-                IconButton(
-                  onPressed: () => context.go('/notifications'),
-                  icon: const Icon(Iconsax.notification, color: TradieColors.charcoal),
-                ),
-                GestureDetector(
-                  onTap: () => context.go('/profile'),
-                  child: Padding(
-                    padding: const EdgeInsets.only(right: 16, left: 4),
-                    child: CircleAvatar(
-                      radius: 17,
-                      backgroundColor: TradieColors.electricBlue.withOpacity(0.12),
-                      child: Text(
-                        firstName.isNotEmpty ? firstName[0].toUpperCase() : 'U',
-                        style: const TextStyle(fontWeight: FontWeight.w700, color: TradieColors.electricBlue, fontSize: 14),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            SliverToBoxAdapter(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-                // ── KPI grid ────────────────────────────────────
-                const SizedBox(height: 20),
-                _SectionHeader(title: "Today's Overview", action: null),
-                const SizedBox(height: 12),
-                stats.when(
-                  data: (d) => _KPIGrid(data: d),
-                  loading: () => const _KPIGridSkeleton(),
-                  error: (_, __) => const _KPIGridSkeleton(),
-                ),
-
-                // ── Wide KPIs (revenue + workers) ───────────────
-                const SizedBox(height: 12),
-                stats.when(
-                  data: (d) => _WideKPIRow(data: d),
-                  loading: () => const SizedBox(height: 72),
-                  error: (_, __) => const SizedBox(),
-                ),
-
-                // ── Quick actions ────────────────────────────────
-                const SizedBox(height: 24),
-                const _SectionHeader(title: 'Quick Actions'),
-                const SizedBox(height: 12),
-                const _QuickActions(),
-
-                // ── Pending tasks ────────────────────────────────
-                const SizedBox(height: 24),
-                _SectionHeader(
-                  title: 'Task Reminders',
-                  action: TextButton(
-                    onPressed: () => context.push('/tasks'),
-                    child: const Text('See all', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                stats.when(
-                  data: (d) => _TasksPreview(tasks: (d['pending_tasks'] as List<dynamic>?) ?? []),
-                  loading: () => const _TaskSkeleton(),
-                  error: (_, __) => const SizedBox(),
-                ),
-
-                // ── Today's jobs ─────────────────────────────────
-                const SizedBox(height: 24),
-                _SectionHeader(
-                  title: "Today's Jobs",
-                  action: TextButton(
-                    onPressed: () => context.go('/jobs'),
-                    child: const Text('See all', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                const TodayJobsWidget(),
-
-                // ── Activity feed ─────────────────────────────────
-                const SizedBox(height: 24),
-                _SectionHeader(
-                  title: 'Recent Activity',
-                  action: TextButton(
-                    onPressed: () => context.push('/activity'),
-                    child: const Text('See all', style: TextStyle(fontSize: 12)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                const ActivityFeedWidget(limit: 6),
-                const SizedBox(height: 100),
-              ]),
-            ),
+        color: TradieColors.electricBlue,
+        backgroundColor: TradieColors.white,
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            _GreetingTile(firstName: firstName),
+            _ActiveJobsTile(stats: stats),
+            _OutstandingInvoicesTile(stats: stats),
+            _ScheduleTile(stats: stats),
+            const _QuickActionsTile(),
+            _RecentActivityTile(stats: stats),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () => context.go('/jobs/create'),
-        backgroundColor: TradieColors.electricBlue,
-        foregroundColor: TradieColors.white,
-        child: const Icon(Iconsax.add),
+    );
+  }
+}
+
+// ─── Tile 1 — Greeting (light/white) ─────────────────────────────────────────
+
+class _GreetingTile extends StatelessWidget {
+  final String firstName;
+  const _GreetingTile({required this.firstName});
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+    final greeting = _greeting();
+    final headline = firstName.isNotEmpty
+        ? '$greeting, $firstName.'
+        : '$greeting.';
+
+    return AppleTile(
+      alignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(24, 96, 24, 64),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            headline,
+            textAlign: TextAlign.center,
+            style: tt.displayMedium?.copyWith(
+              color: TradieColors.charcoal,
+              letterSpacing: -0.4,
+              height: 1.10,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            "Here's what's happening today.",
+            textAlign: TextAlign.center,
+            style: tt.headlineLarge?.copyWith(
+              color: TradieColors.grey600,
+              height: 1.14,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  String _todayDate() {
-    final now = DateTime.now();
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const days   = ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
-    return '${days[now.weekday - 1]}, ${now.day} ${months[now.month - 1]}';
+  String _greeting() {
+    final h = DateTime.now().hour;
+    if (h < 12) return 'Good morning';
+    if (h < 18) return 'Good afternoon';
+    return 'Good evening';
   }
 }
 
-// ── KPI grid ──────────────────────────────────────────────────────
+// ─── Tile 2 — Active jobs (dark) ─────────────────────────────────────────────
 
-class _KPIGrid extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _KPIGrid({required this.data});
+class _ActiveJobsTile extends StatelessWidget {
+  final AsyncValue<Map<String, dynamic>> stats;
+  const _ActiveJobsTile({required this.stats});
 
   @override
   Widget build(BuildContext context) {
-    final jobsToday       = data['jobs_today'] ?? 0;
-    final jobsInProgress  = data['jobs_in_progress'] ?? 0;
-    final pendingQuotes   = data['pending_quotes'] ?? 0;
-    final overdueInvoices = data['overdue_invoices'] ?? 0;
+    final tt = Theme.of(context).textTheme;
+    final data = stats.asData?.value ?? const {};
+    final jobsToday = (data['jobs_today'] as int?) ?? 0;
+    final jobsInProgress = (data['jobs_in_progress'] as int?) ?? 0;
+    final scheduledThisWeek = jobsToday + jobsInProgress;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: GridView.count(
-        crossAxisCount: 2,
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.35,
+    return AppleTile(
+      dark: true,
+      alignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(24, 80, 24, 80),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          KPICard(
-            title: "Jobs Today",
-            value: '$jobsToday',
-            icon: Iconsax.briefcase,
-            color: TradieColors.electricBlue,
-            onTap: () => context.go('/jobs'),
+          Text(
+            'Active jobs',
+            textAlign: TextAlign.center,
+            style: tt.displayMedium?.copyWith(
+              color: TradieColors.white,
+              letterSpacing: -0.4,
+              height: 1.10,
+            ),
           ),
-          KPICard(
-            title: 'In Progress',
-            value: '$jobsInProgress',
-            icon: Iconsax.activity,
-            color: TradieColors.safetyOrange,
-            onTap: () => context.go('/jobs'),
+          const SizedBox(height: 32),
+          Text(
+            '$jobsInProgress',
+            textAlign: TextAlign.center,
+            style: tt.displayLarge?.copyWith(
+              color: TradieColors.white,
+              letterSpacing: -0.6,
+              height: 1.07,
+            ),
           ),
-          KPICard(
-            title: 'Pending Quotes',
-            value: '$pendingQuotes',
-            icon: Iconsax.document_text,
-            color: TradieColors.warningAmber,
-            onTap: () => context.go('/quotes'),
+          const SizedBox(height: 16),
+          Text(
+            scheduledThisWeek == 1
+                ? '1 scheduled this week'
+                : '$scheduledThisWeek scheduled this week',
+            textAlign: TextAlign.center,
+            style: tt.headlineLarge?.copyWith(
+              color: TradieColors.white.withOpacity(0.8),
+              height: 1.14,
+            ),
           ),
-          KPICard(
-            title: 'Overdue Invoices',
-            value: '$overdueInvoices',
-            icon: Iconsax.receipt_disslike,
-            color: TradieColors.alertRed,
-            onTap: () => context.go('/invoices'),
+          const SizedBox(height: 40),
+          ApplePillButton(
+            label: 'View jobs',
+            primary: true,
+            onPressed: () => context.go('/jobs'),
           ),
         ],
       ),
@@ -239,210 +160,487 @@ class _KPIGrid extends StatelessWidget {
   }
 }
 
-class _KPIGridSkeleton extends StatelessWidget {
-  const _KPIGridSkeleton();
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    child: GridView.count(
-      crossAxisCount: 2, shrinkWrap: true, physics: const NeverScrollableScrollPhysics(),
-      crossAxisSpacing: 12, mainAxisSpacing: 12, childAspectRatio: 1.35,
-      children: List.generate(4, (_) => Container(
-        decoration: BoxDecoration(color: TradieColors.grey200, borderRadius: BorderRadius.circular(14)),
-      )),
-    ),
-  );
-}
+// ─── Tile 3 — Outstanding invoices (parchment) ───────────────────────────────
 
-// ── Wide KPI row ──────────────────────────────────────────────────
-
-class _WideKPIRow extends StatelessWidget {
-  final Map<String, dynamic> data;
-  const _WideKPIRow({required this.data});
+class _OutstandingInvoicesTile extends StatelessWidget {
+  final AsyncValue<Map<String, dynamic>> stats;
+  const _OutstandingInvoicesTile({required this.stats});
 
   @override
   Widget build(BuildContext context) {
-    final revMonth    = (data['revenue_month'] as num?)?.toDouble() ?? 0;
-    final unpaidAmt   = (data['unpaid_invoices'] as num?)?.toDouble() ?? 0;
-    final revTrend    = (data['revenue_trend'] as List<dynamic>?)
-        ?.map((e) => ((e as Map)['revenue'] as num?)?.toDouble() ?? 0.0)
-        .toList() ?? [];
+    final tt = Theme.of(context).textTheme;
+    final data = stats.asData?.value ?? const {};
+    final unpaid = (data['unpaid_invoices'] as num?)?.toDouble() ?? 0.0;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(children: [
-        KPICardWide(
-          title: 'Revenue This Month',
-          value: '\$${_fmt(revMonth)}',
-          icon: Iconsax.dollar_circle,
-          color: TradieColors.successGreen,
-          sparkData: revTrend,
-        ),
-        const SizedBox(height: 10),
-        KPICardWide(
-          title: 'Unpaid Invoices',
-          value: '\$${_fmt(unpaidAmt)}',
-          subtitle: 'outstanding balance',
-          icon: Iconsax.receipt_2,
-          color: unpaidAmt > 0 ? TradieColors.alertRed : TradieColors.successGreen,
-        ),
-      ]),
+    return AppleTile(
+      parchment: true,
+      alignment: CrossAxisAlignment.center,
+      padding: const EdgeInsets.fromLTRB(24, 80, 24, 80),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Text(
+            'Outstanding invoices',
+            textAlign: TextAlign.center,
+            style: tt.displayMedium?.copyWith(
+              color: TradieColors.charcoal,
+              letterSpacing: -0.4,
+              height: 1.10,
+            ),
+          ),
+          const SizedBox(height: 32),
+          Text(
+            '\$${_fmt(unpaid)}',
+            textAlign: TextAlign.center,
+            style: tt.displayLarge?.copyWith(
+              color: TradieColors.charcoal,
+              letterSpacing: -0.6,
+              height: 1.07,
+            ),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Outstanding balance.',
+            textAlign: TextAlign.center,
+            style: tt.headlineLarge?.copyWith(
+              color: TradieColors.grey600,
+              height: 1.14,
+            ),
+          ),
+          const SizedBox(height: 40),
+          ApplePillButton(
+            label: 'Send reminders',
+            primary: false,
+            onPressed: () => context.go('/invoices'),
+          ),
+        ],
+      ),
     );
   }
 
   String _fmt(double v) {
     if (v >= 1000000) return '${(v / 1000000).toStringAsFixed(1)}M';
-    if (v >= 1000)    return '${(v / 1000).toStringAsFixed(1)}k';
+    if (v >= 1000) return '${(v / 1000).toStringAsFixed(1)}k';
     return v.toStringAsFixed(0);
   }
 }
 
-// ── Quick actions ─────────────────────────────────────────────────
+// ─── Tile 4 — Today's schedule (dark) ────────────────────────────────────────
 
-class _QuickActions extends StatelessWidget {
-  const _QuickActions();
+class _ScheduleTile extends StatelessWidget {
+  final AsyncValue<Map<String, dynamic>> stats;
+  const _ScheduleTile({required this.stats});
+
   @override
   Widget build(BuildContext context) {
-    final actions = [
-      (Iconsax.add_circle,    'New Job',       TradieColors.electricBlue,    '/jobs/create'),
-      (Iconsax.profile_add,   'Add Customer',  TradieColors.successGreen,    '/customers'),
-      (Iconsax.document_text, 'New Quote',     TradieColors.warningAmber,    '/quotes'),
-      (Iconsax.receipt_add,   'New Invoice',   TradieColors.safetyOrange,    '/invoices'),
-      (Iconsax.task_square,   'Add Task',      const Color(0xFF8B5CF6),      '/tasks'),
-    ];
-    return SizedBox(
-      height: 90,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        children: actions.map((a) => _QuickChip(icon: a.$1, label: a.$2, color: a.$3, route: a.$4)).toList(),
+    final tt = Theme.of(context).textTheme;
+    final data = stats.asData?.value ?? const {};
+    final jobs = (data['today_jobs'] as List<dynamic>?) ?? const [];
+    final next = jobs.take(3).toList();
+
+    return AppleTile(
+      dark: true,
+      alignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(24, 80, 24, 80),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            "Today's schedule.",
+            style: tt.displayMedium?.copyWith(
+              color: TradieColors.white,
+              letterSpacing: -0.4,
+              height: 1.10,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            next.isEmpty
+                ? 'Nothing on the calendar.'
+                : '${next.length} upcoming.',
+            style: tt.headlineLarge?.copyWith(
+              color: TradieColors.white.withOpacity(0.8),
+              height: 1.14,
+            ),
+          ),
+          const SizedBox(height: 48),
+          if (next.isEmpty)
+            Text(
+              'Your day is clear.',
+              style: tt.bodyLarge?.copyWith(
+                color: TradieColors.white.withOpacity(0.48),
+                height: 1.47,
+              ),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (int i = 0; i < next.length; i++) ...[
+                  if (i > 0)
+                    Container(
+                      height: 1,
+                      color: TradieColors.white.withOpacity(0.08),
+                      margin: const EdgeInsets.symmetric(vertical: 20),
+                    ),
+                  _ScheduleRow(job: next[i] as Map<String, dynamic>),
+                ],
+              ],
+            ),
+          const SizedBox(height: 40),
+          ApplePillButton(
+            label: 'Open schedule',
+            primary: true,
+            onPressed: () => context.go('/jobs'),
+          ),
+        ],
       ),
     );
   }
 }
 
-class _QuickChip extends StatelessWidget {
+class _ScheduleRow extends StatelessWidget {
+  final Map<String, dynamic> job;
+  const _ScheduleRow({required this.job});
+
+  @override
+  Widget build(BuildContext context) {
+    final time = job['time']?.toString() ?? '—';
+    final title = job['title']?.toString() ?? 'Untitled job';
+    final location = job['customer']?.toString() ??
+        job['location']?.toString() ??
+        '';
+
+    return GestureDetector(
+      onTap: () {
+        final id = job['id']?.toString();
+        if (id != null && id.isNotEmpty) context.go('/jobs/$id');
+      },
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 84,
+            child: Text(
+              time,
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+                color: TradieColors.white,
+                height: 1.24,
+                letterSpacing: -0.374,
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: 'Inter',
+                    fontSize: 17,
+                    fontWeight: FontWeight.w400,
+                    color: TradieColors.white,
+                    height: 1.47,
+                    letterSpacing: -0.374,
+                  ),
+                ),
+                if (location.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    location,
+                    style: TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 14,
+                      fontWeight: FontWeight.w400,
+                      color: TradieColors.white.withOpacity(0.48),
+                      height: 1.43,
+                      letterSpacing: -0.224,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Tile 5 — Quick actions (light/white) ────────────────────────────────────
+
+class _QuickActionsTile extends StatelessWidget {
+  const _QuickActionsTile();
+
+  @override
+  Widget build(BuildContext context) {
+    final tt = Theme.of(context).textTheme;
+
+    final actions = <_QuickAction>[
+      _QuickAction(
+        icon: Iconsax.add_circle,
+        label: 'New job',
+        route: '/jobs/create',
+      ),
+      _QuickAction(
+        icon: Iconsax.receipt_add,
+        label: 'New invoice',
+        route: '/invoices',
+      ),
+      _QuickAction(
+        icon: Iconsax.profile_add,
+        label: 'New customer',
+        route: '/customers',
+      ),
+      _QuickAction(
+        icon: Iconsax.clock,
+        label: 'Time clock',
+        route: '/timesheets',
+      ),
+    ];
+
+    return AppleTile(
+      alignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(24, 80, 24, 80),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Quick actions.',
+            style: tt.displayMedium?.copyWith(
+              color: TradieColors.charcoal,
+              letterSpacing: -0.4,
+              height: 1.10,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'One tap to get moving.',
+            style: tt.headlineLarge?.copyWith(
+              color: TradieColors.grey600,
+              height: 1.14,
+            ),
+          ),
+          const SizedBox(height: 48),
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisSpacing: 16,
+            mainAxisSpacing: 16,
+            childAspectRatio: 1.2,
+            children: [
+              for (final a in actions)
+                AppleCard(
+                  onTap: () => context.go(a.route),
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Icon(
+                        a.icon,
+                        color: TradieColors.electricBlue,
+                        size: 28,
+                      ),
+                      Text(
+                        a.label,
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: TradieColors.charcoal,
+                          height: 1.24,
+                          letterSpacing: -0.374,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QuickAction {
   final IconData icon;
   final String label;
-  final Color color;
   final String route;
-  const _QuickChip({required this.icon, required this.label, required this.color, required this.route});
-
-  @override
-  Widget build(BuildContext context) => GestureDetector(
-    onTap: () => context.push(route),
-    child: Container(
-      margin: const EdgeInsets.only(right: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, color: color, size: 22),
-        const SizedBox(height: 5),
-        Text(label, style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
-      ]),
-    ),
-  );
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.route,
+  });
 }
 
-// ── Tasks preview ─────────────────────────────────────────────────
+// ─── Tile 6 — Recent activity (parchment) ────────────────────────────────────
 
-class _TasksPreview extends StatelessWidget {
-  final List<dynamic> tasks;
-  const _TasksPreview({required this.tasks});
+class _RecentActivityTile extends StatelessWidget {
+  final AsyncValue<Map<String, dynamic>> stats;
+  const _RecentActivityTile({required this.stats});
 
   @override
   Widget build(BuildContext context) {
-    if (tasks.isEmpty) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: TradieColors.grey100,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Row(children: [
-            Icon(Iconsax.tick_circle, color: TradieColors.successGreen, size: 18),
-            SizedBox(width: 10),
-            Text('No tasks due soon', style: TextStyle(color: TradieColors.grey600, fontSize: 13)),
-          ]),
-        ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(children: tasks.take(3).map((t) {
-        final task = t as Map<String, dynamic>;
-        final priority = task['priority']?.toString() ?? 'medium';
-        final overdue = task['overdue'] == true;
-        return Container(
-          margin: const EdgeInsets.only(bottom: 6),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: TradieColors.white,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: overdue ? TradieColors.alertRed.withOpacity(0.3) : TradieColors.grey200),
-          ),
-          child: Row(children: [
-            Container(
-              width: 8, height: 8,
-              decoration: BoxDecoration(color: _priorityColor(priority), shape: BoxShape.circle),
+    final tt = Theme.of(context).textTheme;
+    final data = stats.asData?.value ?? const {};
+    final activity = ((data['activity'] as List<dynamic>?) ?? const [])
+        .take(5)
+        .toList();
+
+    return AppleTile(
+      parchment: true,
+      alignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(24, 80, 24, 96),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Recent activity.',
+            style: tt.displayMedium?.copyWith(
+              color: TradieColors.charcoal,
+              letterSpacing: -0.4,
+              height: 1.10,
             ),
-            const SizedBox(width: 10),
-            Expanded(child: Text(task['title']?.toString() ?? '',
-              style: TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w500,
-                color: overdue ? TradieColors.alertRed : TradieColors.navy,
-              ), maxLines: 1, overflow: TextOverflow.ellipsis)),
-            if (task['due'] != null)
-              Text(task['due'].toString(),
-                style: TextStyle(fontSize: 11, color: overdue ? TradieColors.alertRed : TradieColors.grey400)),
-          ]),
-        );
-      }).toList()),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            "What's been happening across your business.",
+            style: tt.headlineLarge?.copyWith(
+              color: TradieColors.grey600,
+              height: 1.14,
+            ),
+          ),
+          const SizedBox(height: 48),
+          if (activity.isEmpty)
+            Text(
+              'No activity yet.',
+              style: tt.bodyLarge?.copyWith(
+                color: TradieColors.grey400,
+                height: 1.47,
+              ),
+            )
+          else
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                for (int i = 0; i < activity.length; i++) ...[
+                  if (i > 0)
+                    Container(
+                      height: 1,
+                      color: TradieColors.grey200,
+                      margin: const EdgeInsets.symmetric(vertical: 16),
+                    ),
+                  _ActivityRow(item: activity[i] as Map<String, dynamic>),
+                ],
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ActivityRow extends StatelessWidget {
+  final Map<String, dynamic> item;
+  const _ActivityRow({required this.item});
+
+  @override
+  Widget build(BuildContext context) {
+    final action = item['action']?.toString() ?? '';
+    final userName = item['user_name']?.toString() ?? 'System';
+    final entityType = item['entity_type']?.toString() ?? '';
+    final time = _timeAgo(item['created_at']);
+    final summary =
+        '$userName ${_actionLabel(action)}${entityType.isNotEmpty ? ' $entityType' : ''}';
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          margin: const EdgeInsets.only(top: 9),
+          width: 8,
+          height: 8,
+          decoration: const BoxDecoration(
+            color: TradieColors.electricBlue,
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Text(
+            summary,
+            style: const TextStyle(
+              fontFamily: 'Inter',
+              fontSize: 17,
+              fontWeight: FontWeight.w400,
+              color: TradieColors.charcoal,
+              height: 1.47,
+              letterSpacing: -0.374,
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Text(
+          time,
+          style: const TextStyle(
+            fontFamily: 'Inter',
+            fontSize: 14,
+            fontWeight: FontWeight.w400,
+            color: TradieColors.grey400,
+            height: 1.43,
+            letterSpacing: -0.224,
+          ),
+        ),
+      ],
     );
   }
 
-  Color _priorityColor(String p) {
-    switch (p) {
-      case 'urgent': return TradieColors.alertRed;
-      case 'high':   return TradieColors.safetyOrange;
-      case 'medium': return TradieColors.warningAmber;
-      default:       return TradieColors.grey400;
+  String _actionLabel(String action) {
+    final parts = action.split('.');
+    if (parts.length < 2) return action;
+    switch (parts[1]) {
+      case 'created':
+        return 'created a';
+      case 'updated':
+        return 'updated a';
+      case 'deleted':
+        return 'deleted a';
+      case 'completed':
+        return 'completed a';
+      case 'sent':
+        return 'sent a';
+      case 'paid':
+        return 'marked paid a';
+      case 'login':
+        return 'logged in';
+      case 'logout':
+        return 'logged out';
+      default:
+        return parts[1];
     }
   }
-}
 
-class _TaskSkeleton extends StatelessWidget {
-  const _TaskSkeleton();
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    child: Column(children: List.generate(2, (_) => Container(
-      height: 38, margin: const EdgeInsets.only(bottom: 6),
-      decoration: BoxDecoration(color: TradieColors.grey100, borderRadius: BorderRadius.circular(10)),
-    ))),
-  );
-}
-
-// ── Section header ────────────────────────────────────────────────
-
-class _SectionHeader extends StatelessWidget {
-  final String title;
-  final Widget? action;
-  const _SectionHeader({required this.title, this.action});
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 16),
-    child: Row(children: [
-      Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: TradieColors.navy)),
-      const Spacer(),
-      if (action != null) action!,
-    ]),
-  );
+  String _timeAgo(dynamic iso) {
+    if (iso == null) return '';
+    try {
+      final dt = DateTime.parse(iso.toString()).toLocal();
+      final diff = DateTime.now().difference(dt);
+      if (diff.inMinutes < 1) return 'just now';
+      if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+      if (diff.inHours < 24) return '${diff.inHours}h';
+      if (diff.inDays < 7) return '${diff.inDays}d';
+      return '${(diff.inDays / 7).floor()}w';
+    } catch (_) {
+      return '';
+    }
+  }
 }

@@ -223,7 +223,7 @@ class _SummaryCard extends StatelessWidget {
           child: _MetricItem(
             label: 'GST Claimable',
             value: _fmt.format(gstClaimable),
-            icon: Iconsax.receipt_tax,
+            icon: Iconsax.receipt_2,
             light: true,
           ),
         ),

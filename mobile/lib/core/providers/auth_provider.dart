@@ -6,16 +6,8 @@ import '../api/api_client.dart';
 const _storage = FlutterSecureStorage();
 
 // ── Auth state ─────────────────────────────────────────────────────
-final authStateProvider = FutureProvider<Map<String, dynamic>?>((ref) async {
-  final token = await _storage.read(key: 'access_token');
-  if (token == null) return null;
-  try {
-    final client = ref.read(apiClientProvider);
-    final resp = await client.get('/auth/me');
-    return resp.data as Map<String, dynamic>;
-  } catch (_) {
-    return null;
-  }
+final authStateProvider = Provider<AsyncValue<Map<String, dynamic>?>>((ref) {
+  return ref.watch(authNotifierProvider);
 });
 
 // ── Auth notifier ──────────────────────────────────────────────────

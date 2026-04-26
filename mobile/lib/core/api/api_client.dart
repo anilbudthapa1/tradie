@@ -2,7 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
-const _baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://10.0.2.2:8080');
+const _baseUrl = String.fromEnvironment('API_URL', defaultValue: 'http://localhost:8080');
 
 final apiClientProvider = Provider<ApiClient>((ref) => ApiClient());
 

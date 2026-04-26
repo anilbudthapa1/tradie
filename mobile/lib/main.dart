@@ -4,8 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 import 'core/utils/theme.dart';
-import 'core/api/api_client.dart';
-import 'core/services/auth_service.dart';
 import 'core/router/router.dart';
 
 void main() async {

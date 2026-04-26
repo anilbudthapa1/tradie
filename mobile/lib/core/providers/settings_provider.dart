@@ -237,4 +237,22 @@ class SettingsNotifier extends StateNotifier<AsyncValue<void>> {
       return null;
     }
   }
+
+  Future<Map<String, dynamic>?> getStripeStatus() async {
+    try {
+      final resp = await _api.get('/settings/integrations/stripe/status');
+      return resp.data as Map<String, dynamic>?;
+    } on DioException {
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> createBillingPortal() async {
+    try {
+      final resp = await _api.post('/subscription/billing-portal');
+      return resp.data as Map<String, dynamic>?;
+    } on DioException {
+      return null;
+    }
+  }
 }

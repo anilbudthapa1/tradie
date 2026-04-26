@@ -166,7 +166,7 @@ class _NotifTile extends StatelessWidget {
       case 'job_assigned': return Iconsax.briefcase;
       case 'job_reminder': return Iconsax.clock;
       case 'invoice_paid': return Iconsax.money_tick;
-      case 'invoice_overdue': return Iconsax.receipt_disslike;
+      case 'invoice_overdue': return Iconsax.receipt_minus;
       case 'payment_failed': return Iconsax.wallet_remove;
       case 'safety_alert': return Iconsax.shield_cross;
       case 'team_update': return Iconsax.people;
