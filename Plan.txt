@@ -1,0 +1,69 @@
+Phase 1 — Stabilise what exists (2–3 weeks)                                                                                                                                                                                                 
+                  
+  - Audit every module: does it work end-to-end on web + mobile?                                                                                                                                                                              
+  - Fix broken flows, dead endpoints, mock data still in screens
+  - Get test coverage to a baseline (~40%) on critical paths: auth, payments, payroll                                                                                                                                                         
+  - Run flutter analyze and go vet until clean                                                                                                                                                                                                
+  - Deliverable: every advertised feature actually works for one logged-in user                                                                                                                                                               
+                                                                                                                                                                                                                                              
+  Phase 2 — Multi-tenancy hardening (1–2 weeks)                                                                                                                                                                                               
+                                                                                                                                                                                                                                              
+  This is the #1 thing that kills SaaS apps. Every query, every file upload, every websocket must be scoped to tenant_id.                                                                                                                     
+  - Audit every DB query — does it filter by tenant?
+  - Row-level security in Postgres as a safety net                                                                                                                                                                                            
+  - File storage paths must include tenant ID     
+  - Deliverable: customer A literally cannot see customer B's data even if they try                                                                                                                                                           
+                                                                                                                                                                                                                                              
+  Phase 3 — Billing & subscription (1–2 weeks)                                                                                                                                                                                                
+                                                                                                                                                                                                                                              
+  - Integrate Stripe (or Paddle for AU/global tax handling)                                                                                                                                                                                   
+  - Build the 5 plan tiers from your pricing (Small → Full Pro)
+  - Webhook handler: customer.subscription.updated → flip features on/off                                                                                                                                                                     
+  - Plan gating in code: if !tenant.plan.allows("white_label") { 403 }                                                                                                                                                                        
+  - Trial logic: 14 days, no card required, email reminders at day 7/12/14                                                                                                                                                                    
+  - Deliverable: a real customer can sign up, pay, and use the app                                                                                                                                                                            
+                                                                                                                                                                                                                                              
+  Phase 4 — Onboarding & UX polish (2–3 weeks)                                                                                                                                                                                                
+                  
+  The make-or-break phase. Most SaaS dies here.                                                                                                                                                                                               
+  - Sign-up flow → email verify → guided tour → first job created
+  - Empty states that teach (not "no data" — show what to do)                                                                                                                                                                                 
+  - In-app help, tooltips, video walkthroughs                
+  - Mobile push notifications (FCM)                                                                                                                                                                                                           
+  - Email templates: welcome, trial-ending, payment-failed, weekly digest                                                                                                                                                                     
+  - Apply your design system (.claude/styling.md) consistently across every screen                                                                                                                                                            
+  - Deliverable: a tradie who's never seen the app can sign up and create their first invoice in under 10 minutes                                                                                                                             
+                                                                                                                                                                                                                                              
+  Phase 5 — Marketing site + legal (1 week)                                                                                                                                                                                                   
+                                                                                                                                                                                                                                              
+  - Landing page: hero, features, pricing, testimonials, FAQ, sign-up CTA                                                                                                                                                                     
+  - Legal: Privacy Policy, Terms of Service, Acceptable Use, Refund Policy
+  - For Australia: ensure GST handling, ABN collection for invoicing, Privacy Act 1988 compliance                                                                                                                                             
+  - Cookie consent if you serve EU                                                                                                                                                                                                            
+  - Deliverable: a marketing URL that converts visitors to trials                                                                                                                                                                             
+                                                                                                                                                                                                                                              
+  Phase 6 — Production deployment (1 week)                                                                                                                                                                                                    
+                                                                                                                                                                                                                                              
+  Use the prod plan from earlier:                                                                                                                                                                                                             
+  - Hetzner/DO VPS + managed Postgres (Neon) + Upstash Redis + Cloudflare R2
+  - Caddy for TLS                                                                                                                                                                                                                             
+  - GitHub Actions CI/CD: tag → deploy
+  - Sentry + UptimeRobot + Grafana Cloud                                                                                                                                                                                                      
+  - Daily backups, tested restore       
+  - Deliverable: https://yourapp.com.au is live, monitored, backed up                                                                                                                                                                         
+                                                                                                                                                                                                                                              
+  Phase 7 — Beta with 5–10 real tradies (4–6 weeks)                                                                                                                                                                                           
+                                                                                                                                                                                                                                              
+  - Recruit from local trade FB groups, /r/AusTrades, in-person at supply shops                                                                                                                                                               
+  - Free for 90 days in exchange for weekly feedback calls                                                                                                                                                                                    
+  - Measure: time to first job, feature usage, drop-off points, support tickets                                                                                                                                                               
+  - Fix the top 10 friction points they hit
+  - Deliverable: 3+ tradies using it daily without you holding their hand                                                                                                                                                                     
+                                                                                                                                                                                                                                              
+  Phase 8 — Launch & growth (ongoing)                                                                                                                                                                                                         
+                                                                                                                                                                                                                                              
+  - ProductHunt, HackerNews "Show HN", LinkedIn                                                                                                                                                                                               
+  - SEO content: "best invoicing app for Australian electricians", etc.
+  - Referral program (you already have M123!)                                                                                                                                                                                                 
+  - Paid acquisition once you know your CAC vs LTV                                                                                                                                                                                            
+  - Hire support person at ~50 paying customers              
