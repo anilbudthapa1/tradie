@@ -1,0 +1,59 @@
+# Production compose for defecexinso.com.
+#
+# Assumes:
+#   - Postgres + Redis are managed (Neon / Upstash / etc.) and reached
+#     via DATABASE_URL / REDIS_URL in .env.production.
+#   - Object storage is Cloudflare R2 (S3-compatible) — set S3_*.
+#   - Caddy handles TLS termination + serves the Flutter web build.
+#   - Backend image is prebuilt and tagged (CI or local docker build).
+#
+# Run on the server:
+#   docker compose -f infra/docker-compose.prod.yml --env-file backend/.env.production up -d
+#
+# Update API only (zero-downtime-ish):
+#   docker compose -f infra/docker-compose.prod.yml pull api
+#   docker compose -f infra/docker-compose.prod.yml up -d --no-deps api
+
+services:
+  api:
+    image: ${API_IMAGE:-ghcr.io/your-org/tradie-api:latest}
+    restart: always
+    env_file:
+      - ../backend/.env.production
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: always
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"  # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./web:/srv/web:ro             # Flutter build artifacts (build/web)
+      - caddy_data:/data              # certs + ACME state
+      - caddy_config:/config
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+volumes:
+  caddy_data:
+  caddy_config:

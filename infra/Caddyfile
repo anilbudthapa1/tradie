@@ -1,0 +1,69 @@
+# defecexinso.com — TLS via Let's Encrypt, served by Caddy.
+#
+# - /api/*  → backend API (Go service in the api container).
+# - /ws     → backend WebSocket (legacy hub).
+# - /chat/ws → backend chat WebSocket.
+# - /api/v1/webhooks/* → backend (Stripe).
+# - everything else → static Flutter web build at /srv/web.
+#
+# Caddy auto-issues + renews certs for the configured hostname. Make
+# sure the A record for defecexinso.com points at this server and ports
+# 80 + 443 are open in the firewall before first start.
+
+{
+	# Email used by Let's Encrypt for expiry notices + recovery.
+	email admin@defecexinso.com
+
+	# Sensible global defaults.
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+defecexinso.com, www.defecexinso.com {
+	# Force HTTPS, HSTS preload, basic hardening.
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(self), microphone=(self), camera=(self)"
+		# Don't expose server identity.
+		-Server
+	}
+
+	# Compress everything Caddy sends back.
+	encode gzip zstd
+
+	# WebSocket: chat handler at /chat/ws (Upgrade: websocket).
+	@chatws path /chat/ws
+	reverse_proxy @chatws api:8080 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# WebSocket: legacy general hub at /ws.
+	@ws path /ws
+	reverse_proxy @ws api:8080 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# REST API + Stripe webhook.
+	@api path /api/* /health
+	reverse_proxy @api api:8080 {
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Flutter web SPA — try files, fall back to index.html for client-side routing.
+	root * /srv/web
+	try_files {path} {path}/ /index.html
+	file_server
+}
