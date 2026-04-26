@@ -41,6 +41,11 @@ class SettingsScreen extends ConsumerWidget {
                 subtitle: 'Currency, date format, language',
                 route: '/settings',
               ),
+              _RowSpec(
+                label: 'Languages',
+                subtitle: 'Translations and templates',
+                route: '/settings/languages',
+              ),
             ],
           ),
           _SectionTile(
@@ -53,6 +58,11 @@ class SettingsScreen extends ConsumerWidget {
                 route: '/workers',
               ),
               _RowSpec(
+                label: 'Leave management',
+                subtitle: 'Requests, approvals, calendar blocking',
+                route: '/leave',
+              ),
+              _RowSpec(
                 label: 'Roles & permissions',
                 subtitle: 'Who can do what',
                 route: '/settings',
@@ -60,7 +70,12 @@ class SettingsScreen extends ConsumerWidget {
               _RowSpec(
                 label: 'Payroll settings',
                 subtitle: 'Pay rates, super, awards',
-                route: '/settings',
+                route: '/payroll',
+              ),
+              _RowSpec(
+                label: 'Payslip generator',
+                subtitle: 'Secure PDF payslips',
+                route: '/payslips',
               ),
             ],
           ),

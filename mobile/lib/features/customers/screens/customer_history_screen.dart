@@ -16,7 +16,7 @@ class CustomerHistoryScreen extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final async = ref.watch(customerHistoryProvider(customerId));
+    final async = ref.watch(customerHistoryProvider(CustomerHistoryFilter(customerId)));
 
     return Scaffold(
       backgroundColor: TradieColors.grey50,
@@ -31,7 +31,7 @@ class CustomerHistoryScreen extends ConsumerWidget {
         actions: [
           IconButton(
             icon: const Icon(Iconsax.refresh),
-            onPressed: () => ref.invalidate(customerHistoryProvider(customerId)),
+            onPressed: () => ref.invalidate(customerHistoryProvider(CustomerHistoryFilter(customerId))),
             tooltip: 'Refresh',
           ),
         ],
@@ -42,7 +42,7 @@ class CustomerHistoryScreen extends ConsumerWidget {
         ),
         error: (e, _) => _ErrorView(
           message: '$e',
-          onRetry: () => ref.invalidate(customerHistoryProvider(customerId)),
+          onRetry: () => ref.invalidate(customerHistoryProvider(CustomerHistoryFilter(customerId))),
         ),
         data: (items) {
           if (items.isEmpty) {
@@ -50,7 +50,7 @@ class CustomerHistoryScreen extends ConsumerWidget {
           }
           return RefreshIndicator(
             onRefresh: () async =>
-                ref.invalidate(customerHistoryProvider(customerId)),
+                ref.invalidate(customerHistoryProvider(CustomerHistoryFilter(customerId))),
             child: ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
               itemCount: items.length,

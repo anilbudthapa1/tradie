@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -49,14 +50,31 @@ type Lead struct {
 // ── List — GET /api/v1/leads ──────────────────────────────────────────────────
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "leads.view") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 
 	status := r.URL.Query().Get("status")
 	assignedTo := r.URL.Query().Get("assigned_to")
 
-	// Pagination
+	// Pagination — page param was previously hardcoded to 1.
 	page := 1
+	if v := r.URL.Query().Get("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 1000 {
+			page = n
+		}
+	}
 	pageSize := 50
+	if v := r.URL.Query().Get("page_size"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			pageSize = n
+		}
+	}
+	if status != "" && !validStatuses[status] {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_status"})
+		return
+	}
 
 	var (
 		rows pgx.Rows
@@ -118,6 +136,9 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 // ── Create — POST /api/v1/leads ───────────────────────────────────────────────
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "leads.create") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	claims := middleware.ClaimsFromCtx(r.Context())
 
@@ -130,25 +151,36 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Notes      string  `json:"notes"`
 		AssignedTo *string `json:"assigned_to,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FirstName == "" {
-		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+	if err := decodeStrict(r, &req); err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
+	if req.FirstName == "" {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "first_name_required"})
 		return
 	}
 
+	// Workers may only assign leads to themselves; managers+ can assign to anyone.
 	var assignedTo *uuid.UUID
 	if req.AssignedTo != nil && *req.AssignedTo != "" {
 		id, err := uuid.Parse(*req.AssignedTo)
-		if err == nil {
-			assignedTo = &id
+		if err != nil {
+			respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_assigned_to"})
+			return
 		}
+		if !middleware.IsAtLeast(claims.Role, "manager") && id != claims.UserID {
+			respond(w, http.StatusForbidden, map[string]string{"error": "forbidden:assign_to_other"})
+			return
+		}
+		assignedTo = &id
 	}
 
 	var l Lead
 	err := h.db.QueryRow(r.Context(),
-		`INSERT INTO leads (business_id, first_name, last_name, email, phone, status, source, notes, assigned_to)
-		 VALUES ($1,$2,$3,$4,$5,'new',$6,$7,$8)
+		`INSERT INTO leads (business_id, created_by, first_name, last_name, email, phone, status, source, notes, assigned_to)
+		 VALUES ($1,$2,$3,$4,$5,$6,'new',$7,$8,$9)
 		 RETURNING id, business_id, first_name, last_name, email, phone, status, source, notes, assigned_to, created_at, updated_at`,
-		bizID, req.FirstName, nullStr(req.LastName), nullStr(req.Email), nullStr(req.Phone),
+		bizID, claims.UserID, req.FirstName, nullStr(req.LastName), nullStr(req.Email), nullStr(req.Phone),
 		nullStr(req.Source), nullStr(req.Notes), assignedTo,
 	).Scan(
 		&l.ID, &l.BusinessID, &l.FirstName, &l.LastName, &l.Email, &l.Phone,
@@ -156,16 +188,13 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	)
 	if err != nil {
 		h.log.Error("leads create", zap.Error(err))
-		respond(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "create_failed"})
 		return
 	}
 
-	h.audit.Log(r.Context(), middleware.AuditEntry{
-		BusinessID: bizID,
-		UserID:     claims.UserID,
-		Action:     "create",
-		EntityType: "lead",
-		EntityID:   l.ID,
+	h.auditModuleAction(r, AuditCreated, l.ID, nil, map[string]interface{}{
+		"first_name": req.FirstName, "source": req.Source,
+		"email": maskedEmail(req.Email), "assigned_to": assignedTo,
 	})
 	respond(w, http.StatusCreated, l)
 }
@@ -173,6 +202,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 // ── Get — GET /api/v1/leads/{id} ──────────────────────────────────────────────
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "leads.view") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
 
@@ -204,6 +236,9 @@ var validStatuses = map[string]bool{
 }
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "leads.update") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
@@ -218,8 +253,8 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		Notes      *string `json:"notes,omitempty"`
 		AssignedTo *string `json:"assigned_to,omitempty"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+	if err := decodeStrict(r, &req); err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -246,6 +281,22 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		respond(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
 		return
 	}
+
+	// Validate status transition before mutating (matches the DB trigger).
+	if req.Status != nil && *req.Status != current.Status {
+		if !allowedStatusTransition[[2]string{current.Status, *req.Status}] {
+			respond(w, http.StatusConflict, map[string]string{
+				"error": "invalid_status_transition",
+				"from":  current.Status,
+				"to":    *req.Status,
+			})
+			return
+		}
+	}
+
+	// Capture old data for the audit payload before merge.
+	oldStatus := current.Status
+	oldAssigned := current.AssignedTo
 
 	// Merge patch fields
 	if req.FirstName != nil {
@@ -283,56 +334,64 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	var updated Lead
 	err = h.db.QueryRow(r.Context(),
 		`UPDATE leads
-		 SET first_name=$1, last_name=$2, email=$3, phone=$4, status=$5, source=$6, notes=$7, assigned_to=$8, updated_at=NOW()
+		 SET first_name=$1, last_name=$2, email=$3, phone=$4, status=$5, source=$6, notes=$7, assigned_to=$8,
+		     updated_by=$11, updated_at=NOW()
 		 WHERE id=$9 AND business_id=$10 AND deleted_at IS NULL
 		 RETURNING id, business_id, first_name, last_name, email, phone, status, source, notes, assigned_to, created_at, updated_at`,
 		current.FirstName, nullStr(current.LastName), nullStr(current.Email), nullStr(current.Phone),
 		current.Status, nullStr(current.Source), nullStr(current.Notes), current.AssignedTo,
-		id, bizID,
+		id, bizID, claims.UserID,
 	).Scan(
 		&updated.ID, &updated.BusinessID, &updated.FirstName, &updated.LastName, &updated.Email, &updated.Phone,
 		&updated.Status, &updated.Source, &updated.Notes, &updated.AssignedTo, &updated.CreatedAt, &updated.UpdatedAt,
 	)
 	if err != nil {
+		// Trigger raises check_violation for invalid transitions.
+		if isStatusTransitionError(err) {
+			respond(w, http.StatusConflict, map[string]string{"error": "invalid_status_transition"})
+			return
+		}
 		h.log.Error("leads update", zap.Error(err))
-		respond(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "update_failed"})
 		return
 	}
 
-	h.audit.Log(r.Context(), middleware.AuditEntry{
-		BusinessID: bizID,
-		UserID:     claims.UserID,
-		Action:     "update",
-		EntityType: "lead",
-		EntityID:   updated.ID,
-	})
+	h.auditModuleAction(r, AuditUpdated, updated.ID,
+		map[string]interface{}{"status": oldStatus, "assigned_to": oldAssigned},
+		map[string]interface{}{"status": updated.Status, "assigned_to": updated.AssignedTo})
 	respond(w, http.StatusOK, updated)
 }
 
 // ── Delete — DELETE /api/v1/leads/{id} ───────────────────────────────────────
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "leads.delete") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	claims := middleware.ClaimsFromCtx(r.Context())
-	id := chi.URLParam(r, "id")
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		respond(w, http.StatusBadRequest, map[string]string{"error": "invalid_id"})
+		return
+	}
 
 	ct, err := h.db.Exec(r.Context(),
-		`UPDATE leads SET deleted_at=NOW() WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL`,
-		id, bizID,
+		`UPDATE leads SET deleted_at=NOW(), updated_by=$3, updated_at=NOW()
+		 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL`,
+		id, bizID, claims.UserID,
 	)
-	if err != nil || ct.RowsAffected() == 0 {
+	if err != nil {
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "delete_failed"})
+		return
+	}
+	if ct.RowsAffected() == 0 {
 		respond(w, http.StatusNotFound, map[string]string{"error": "not_found"})
 		return
 	}
 
-	parsedID, _ := uuid.Parse(id)
-	h.audit.Log(r.Context(), middleware.AuditEntry{
-		BusinessID: bizID,
-		UserID:     claims.UserID,
-		Action:     "delete",
-		EntityType: "lead",
-		EntityID:   parsedID,
-	})
+	h.auditModuleAction(r, AuditDeleted, id, nil, nil)
 	respond(w, http.StatusNoContent, nil)
 }
 
@@ -344,6 +403,9 @@ type convertResponse struct {
 }
 
 func (h *Handler) ConvertToCustomer(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "leads.convert") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
@@ -380,42 +442,53 @@ func (h *Handler) ConvertToCustomer(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context()) //nolint:errcheck
 
+	// Lead must be in 'proposal' to transition to 'won' under the
+	// new transition guard. Direct conversion from earlier statuses
+	// must walk the pipeline first or use a manager override.
+	if l.Status != "proposal" {
+		respond(w, http.StatusConflict, map[string]string{
+			"error":  "lead_not_in_proposal",
+			"status": l.Status,
+		})
+		return
+	}
+
 	var customerID uuid.UUID
 	err = tx.QueryRow(r.Context(),
-		`INSERT INTO customers (business_id, first_name, last_name, email, phone, source, notes)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7)
+		`INSERT INTO customers (business_id, created_by, first_name, last_name, email, phone, source, notes)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
 		 RETURNING id`,
-		bizID, l.FirstName, nullStr(l.LastName), nullStr(l.Email), nullStr(l.Phone),
+		bizID, claims.UserID, l.FirstName, nullStr(l.LastName), nullStr(l.Email), nullStr(l.Phone),
 		nullStr(l.Source), nullStr(l.Notes),
 	).Scan(&customerID)
 	if err != nil {
 		h.log.Error("leads convert: insert customer", zap.Error(err))
-		respond(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "convert_failed"})
 		return
 	}
 
 	_, err = tx.Exec(r.Context(),
-		`UPDATE leads SET status='won', updated_at=NOW() WHERE id=$1 AND business_id=$2`,
-		l.ID, bizID,
+		`UPDATE leads SET status='won', updated_by=$3, updated_at=NOW() WHERE id=$1 AND business_id=$2`,
+		l.ID, bizID, claims.UserID,
 	)
 	if err != nil {
+		if isStatusTransitionError(err) {
+			respond(w, http.StatusConflict, map[string]string{"error": "invalid_status_transition"})
+			return
+		}
 		h.log.Error("leads convert: update lead status", zap.Error(err))
-		respond(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "convert_failed"})
 		return
 	}
 
 	if err := tx.Commit(r.Context()); err != nil {
-		respond(w, http.StatusInternalServerError, map[string]string{"error": "server_error"})
+		respond(w, http.StatusInternalServerError, map[string]string{"error": "commit_failed"})
 		return
 	}
 
-	h.audit.Log(r.Context(), middleware.AuditEntry{
-		BusinessID: bizID,
-		UserID:     claims.UserID,
-		Action:     "convert",
-		EntityType: "lead",
-		EntityID:   l.ID,
-	})
+	h.auditModuleAction(r, AuditUpdated, l.ID,
+		map[string]interface{}{"status": l.Status},
+		map[string]interface{}{"status": "won", "converted_to_customer": customerID})
 
 	respond(w, http.StatusOK, convertResponse{
 		CustomerID: customerID,
@@ -429,8 +502,10 @@ func (h *Handler) Routes() func(r chi.Router) {
 	return func(r chi.Router) {
 		r.Get("/", h.List)
 		r.Post("/", h.Create)
+		r.Get("/export.csv", h.Export)
 		r.Get("/{id}", h.Get)
 		r.Patch("/{id}", h.Update)
+		r.Put("/{id}", h.Update)
 		r.Delete("/{id}", h.Delete)
 		r.Post("/{id}/convert", h.ConvertToCustomer)
 	}

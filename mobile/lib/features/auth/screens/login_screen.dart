@@ -39,10 +39,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     final state = ref.read(authNotifierProvider);
     state.when(
       data: (user) {
+        setState(() => _loading = false);
         if (user?['mfa_required'] == true) {
           context.go('/auth/mfa', extra: user?['mfa_token']);
         }
-        // Router will redirect on success
+        // Router will redirect on success via refreshListenable
       },
       error: (e, _) => setState(() { _error = 'Invalid email or password'; _loading = false; }),
       loading: () {},

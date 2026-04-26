@@ -39,6 +39,9 @@ func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, audit *mi
 // ── List ───────────────────────────────────────────────────────────────────────
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "customers.view") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 
 	search := r.URL.Query().Get("search")
@@ -79,7 +82,12 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 // ── Create ─────────────────────────────────────────────────────────────────────
 
 func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "customers.create") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
+	claims := middleware.ClaimsFromCtx(r.Context())
+
 	var req struct {
 		FirstName   string   `json:"first_name"`
 		LastName    string   `json:"last_name"`
@@ -90,25 +98,39 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		Tags        []string `json:"tags"`
 		Source      string   `json:"source"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.FirstName == "" {
-		respond(w, 400, map[string]string{"error": "invalid_request"})
+	if err := decodeStrict(r, &req); err != nil {
+		respond(w, 400, map[string]string{"error": err.Error()})
+		return
+	}
+	if strings.TrimSpace(req.FirstName) == "" {
+		respond(w, 400, map[string]string{"error": "first_name_required"})
 		return
 	}
 	var c models.Customer
-	_ = h.db.QueryRow(r.Context(),
-		`INSERT INTO customers (business_id, first_name, last_name, company_name, email, phone, mobile, tags, source)
-		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+	if err := h.db.QueryRow(r.Context(),
+		`INSERT INTO customers (business_id, created_by, first_name, last_name, company_name, email, phone, mobile, tags, source)
+		 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		 RETURNING id, business_id, first_name, last_name, company_name, email, phone, mobile, tags, is_active, source, created_at, updated_at`,
-		bizID, req.FirstName, nullStr(req.LastName), nullStr(req.CompanyName), nullStr(req.Email),
+		bizID, claims.UserID, req.FirstName, nullStr(req.LastName), nullStr(req.CompanyName), nullStr(req.Email),
 		nullStr(req.Phone), nullStr(req.Mobile), req.Tags, nullStr(req.Source),
 	).Scan(&c.ID, &c.BusinessID, &c.FirstName, &c.LastName, &c.CompanyName,
-		&c.Email, &c.Phone, &c.Mobile, &c.Tags, &c.IsActive, &c.Source, &c.CreatedAt, &c.UpdatedAt)
+		&c.Email, &c.Phone, &c.Mobile, &c.Tags, &c.IsActive, &c.Source, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		h.log.Error("create customer", zap.Error(err))
+		respond(w, 500, map[string]string{"error": "create_failed"})
+		return
+	}
+	h.auditModuleAction(r, AuditCreated, c.ID, nil, map[string]interface{}{
+		"first_name": req.FirstName, "company_name": req.CompanyName, "email": maskedEmail(req.Email),
+	})
 	respond(w, 201, c)
 }
 
 // ── Get ────────────────────────────────────────────────────────────────────────
 
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "customers.view") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
 	var c models.Customer
@@ -127,6 +149,9 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 // ── Update ─────────────────────────────────────────────────────────────────────
 
 func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "customers.update") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
@@ -169,9 +194,13 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 	h.audit.Log(r.Context(), middleware.AuditEntry{
 		BusinessID: bizID,
 		UserID:     claims.UserID,
-		Action:     "update",
+		Action:     AuditUpdated,
 		EntityType: "customer",
 		EntityID:   c.ID,
+		NewData: map[string]interface{}{
+			"first_name": c.FirstName, "email": maskedEmailPtr(c.Email),
+		},
+		IPAddress: r.RemoteAddr,
 	})
 	respond(w, 200, c)
 }
@@ -179,13 +208,49 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 // ── Delete ─────────────────────────────────────────────────────────────────────
 
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	if !h.requirePermission(w, r, "customers.delete") {
+		return
+	}
 	bizID := middleware.BusinessIDFromCtx(r.Context())
-	id := chi.URLParam(r, "id")
-	_, _ = h.db.Exec(r.Context(), `UPDATE customers SET deleted_at=NOW() WHERE id=$1 AND business_id=$2`, id, bizID)
+	claims := middleware.ClaimsFromCtx(r.Context())
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		respond(w, 400, map[string]string{"error": "invalid_id"})
+		return
+	}
+
+	tag, err := h.db.Exec(r.Context(),
+		`UPDATE customers SET deleted_at=NOW(), updated_by=$3, updated_at=NOW()
+		 WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL`,
+		id, bizID, claims.UserID)
+	if err != nil {
+		respond(w, 500, map[string]string{"error": "delete_failed"})
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		respond(w, 404, map[string]string{"error": "not_found"})
+		return
+	}
+
+	h.audit.Log(r.Context(), middleware.AuditEntry{
+		BusinessID: bizID,
+		UserID:     claims.UserID,
+		Action:     AuditDeleted,
+		EntityType: "customer",
+		EntityID:   id,
+		IPAddress:  r.RemoteAddr,
+	})
+
 	respond(w, 204, nil)
 }
 
-// ── GetAddresses ───────────────────────────────────────────────────────────────
+// ── GetAddresses (deprecated) ──────────────────────────────────────────────────
+//
+// Address CRUD has moved to handlers/customer_addresses (Module 17).
+// These methods remain only so the legacy export of the customers
+// package symbol set is intact for any unmounted callers; the router
+// no longer points at them.
 
 func (h *Handler) GetAddresses(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())

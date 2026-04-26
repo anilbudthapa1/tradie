@@ -9,6 +9,7 @@ import '../../../core/widgets/apple_card.dart';
 import '../../../core/widgets/apple_pill_button.dart';
 import '../../../core/widgets/apple_tile.dart';
 import '../providers/dashboard_provider.dart';
+import '../widgets/alerts_banner.dart';
 
 /// Apple-grammar dashboard.
 ///
@@ -23,17 +24,24 @@ class DashboardScreen extends ConsumerWidget {
     final auth = ref.watch(authNotifierProvider);
     final stats = ref.watch(dashboardStatsProvider);
     final firstName = auth.asData?.value?['first_name'] as String? ?? '';
+    final role = (auth.asData?.value?['role']?.toString() ?? 'worker').toLowerCase();
+    final ownerView = const {'owner', 'admin', 'manager', 'accountant'}.contains(role);
 
     return Scaffold(
       backgroundColor: TradieColors.white,
       body: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(dashboardStatsProvider),
+        onRefresh: () async {
+          ref.invalidate(dashboardStatsProvider);
+          ref.invalidate(dashboardOwnerProvider);
+          ref.invalidate(dashboardMeProvider);
+        },
         color: TradieColors.electricBlue,
         backgroundColor: TradieColors.white,
         child: ListView(
           padding: EdgeInsets.zero,
           children: [
             _GreetingTile(firstName: firstName),
+            AlertsBanner(selfService: !ownerView),
             _ActiveJobsTile(stats: stats),
             _OutstandingInvoicesTile(stats: stats),
             _ScheduleTile(stats: stats),

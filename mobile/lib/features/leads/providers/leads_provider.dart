@@ -246,3 +246,15 @@ final leadsProvider =
     StateNotifierProvider<LeadsNotifier, LeadsState>(
   (ref) => LeadsNotifier(ref.read(apiClientProvider)),
 );
+
+/// M20 — workers see leads assigned to them plus unassigned 'new' leads
+/// they can pick up from the field. Backend endpoint:
+///   GET /api/v1/me/lead_management_module
+final myLeadsProvider = FutureProvider<List<Lead>>((ref) async {
+  final api = ref.read(apiClientProvider);
+  final resp = await api.get('/me/lead_management_module');
+  return (resp.data as List<dynamic>)
+      .cast<Map<String, dynamic>>()
+      .map(Lead.fromJson)
+      .toList();
+});

@@ -1,6 +1,7 @@
 import 'package:fl_chart/fl_chart.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:iconsax_flutter/iconsax_flutter.dart';
 
 import '../../../core/utils/theme.dart';
@@ -21,7 +22,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
   @override
   void initState() {
     super.initState();
-    _tabs = TabController(length: 4, vsync: this);
+    _tabs = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -65,6 +66,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
             Tab(text: 'Jobs'),
             Tab(text: 'Workers'),
             Tab(text: 'Finance'),
+            Tab(text: 'Widgets'),
           ],
         ),
       ),
@@ -78,6 +80,7 @@ class _AnalyticsScreenState extends ConsumerState<AnalyticsScreen>
           const _JobsTab(),
           const _WorkersTab(),
           const _FinanceTab(),
+          const _WidgetsTab(),
         ],
       ),
     );
@@ -964,4 +967,162 @@ String _today() {
 String _monthStart() {
   final n = DateTime.now();
   return '${n.year}-${n.month.toString().padLeft(2, '0')}-01';
+}
+
+// ── Widgets tab (Module 12) ───────────────────────────────────────
+
+class _WidgetsTab extends ConsumerWidget {
+  const _WidgetsTab();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final tilesAsync = ref.watch(myAnalyticsWidgetsProvider);
+
+    return RefreshIndicator(
+      color: TradieColors.electricBlue,
+      onRefresh: () async => ref.invalidate(myAnalyticsWidgetsProvider),
+      child: tilesAsync.when(
+        loading: () => ListView(children: [const SizedBox(height: 200), Center(child: _loadingCard())]),
+        error: (e, _) => ListView(
+          padding: const EdgeInsets.all(20),
+          children: [_errorCard(e, () => ref.invalidate(myAnalyticsWidgetsProvider))],
+        ),
+        data: (tiles) {
+          if (tiles.isEmpty) {
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: const EdgeInsets.all(20),
+              children: [
+                const SizedBox(height: 60),
+                const Icon(Iconsax.chart_2, size: 48, color: TradieColors.grey400),
+                const SizedBox(height: 12),
+                const Center(
+                  child: Text('No widgets yet',
+                      style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                ),
+                const SizedBox(height: 6),
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      'Pin the metrics that matter to you and they will show up here.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: TradieColors.grey600),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                Center(
+                  child: FilledButton.icon(
+                    onPressed: () => context.push('/analytics/widgets'),
+                    style: FilledButton.styleFrom(backgroundColor: TradieColors.electricBlue),
+                    icon: const Icon(Iconsax.add, size: 18),
+                    label: const Text('Manage widgets'),
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return ListView(
+            padding: const EdgeInsets.all(20),
+            physics: const AlwaysScrollableScrollPhysics(),
+            children: [
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                itemCount: tiles.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 2,
+                  childAspectRatio: 1.35,
+                  crossAxisSpacing: 12,
+                  mainAxisSpacing: 12,
+                ),
+                itemBuilder: (_, i) {
+                  final t = tiles[i] as Map<String, dynamic>;
+                  return _LiveTile(tile: t);
+                },
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                onPressed: () => context.push('/analytics/widgets'),
+                icon: const Icon(Iconsax.setting_2, size: 16),
+                label: const Text('Manage widgets'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _LiveTile extends StatelessWidget {
+  final Map<String, dynamic> tile;
+  const _LiveTile({required this.tile});
+
+  @override
+  Widget build(BuildContext context) {
+    final unit = tile['unit']?.toString() ?? 'count';
+    final raw = tile['value'];
+    final value = raw == null
+        ? '—'
+        : unit == 'aud'
+            ? _fmtMoney((raw as num).toDouble())
+            : unit == 'percent'
+                ? '${(raw as num).toStringAsFixed(0)}%'
+                : (raw as num).toInt().toString();
+    final color = _colorFor(tile['color_token']?.toString() ?? 'blue');
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: TradieColors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: TradieColors.grey200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(_iconFor(tile['icon_token']?.toString() ?? 'chart_2'),
+                size: 16, color: color),
+          ),
+          const Spacer(),
+          Text(value,
+              style: TextStyle(
+                fontSize: 22, fontWeight: FontWeight.w800,
+                color: color, letterSpacing: -0.5)),
+          const SizedBox(height: 2),
+          Text(tile['title']?.toString() ?? '',
+              style: const TextStyle(fontSize: 12, color: TradieColors.grey600)),
+        ],
+      ),
+    );
+  }
+
+  Color _colorFor(String token) => switch (token) {
+        'green' => TradieColors.successGreen,
+        'red' => TradieColors.alertRed,
+        'navy' => TradieColors.navy,
+        'grey' => TradieColors.grey600,
+        _ => TradieColors.electricBlue,
+      };
+
+  IconData _iconFor(String token) => switch (token) {
+        'dollar_circle' => Iconsax.dollar_circle,
+        'briefcase' => Iconsax.briefcase,
+        'document_text' => Iconsax.document_text,
+        'receipt' => Iconsax.receipt,
+        'wallet' => Iconsax.wallet,
+        'health' => Iconsax.health,
+        'warning_2' => Iconsax.warning_2,
+        'people' => Iconsax.people,
+        _ => Iconsax.chart_2,
+      };
 }

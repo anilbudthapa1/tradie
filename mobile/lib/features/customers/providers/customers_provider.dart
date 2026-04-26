@@ -15,6 +15,7 @@ class Customer {
   final List<String> tags;
   final bool isActive;
   final String? source;
+  final String status; // M15: lead | active | inactive | archived
   final String createdAt;
   final String updatedAt;
 
@@ -30,6 +31,7 @@ class Customer {
     required this.tags,
     required this.isActive,
     this.source,
+    this.status = 'active',
     required this.createdAt,
     required this.updatedAt,
   });
@@ -50,6 +52,7 @@ class Customer {
         tags: (j['tags'] as List<dynamic>?)?.cast<String>() ?? [],
         isActive: j['is_active'] as bool? ?? true,
         source: j['source'] as String?,
+        status: (j['status'] as String?) ?? 'active',
         createdAt: j['created_at'] as String,
         updatedAt: j['updated_at'] as String,
       );
@@ -64,12 +67,45 @@ class Customer {
         'notes': notes ?? '',
         'tags': tags,
       };
+
+  Customer copyWith({
+    String? firstName,
+    String? lastName,
+    String? companyName,
+    String? email,
+    String? phone,
+    String? mobile,
+    String? notes,
+    List<String>? tags,
+    bool? isActive,
+    String? source,
+    String? status,
+    String? updatedAt,
+  }) {
+    return Customer(
+      id: id,
+      firstName: firstName ?? this.firstName,
+      lastName: lastName ?? this.lastName,
+      companyName: companyName ?? this.companyName,
+      email: email ?? this.email,
+      phone: phone ?? this.phone,
+      mobile: mobile ?? this.mobile,
+      notes: notes ?? this.notes,
+      tags: tags ?? this.tags,
+      isActive: isActive ?? this.isActive,
+      source: source ?? this.source,
+      status: status ?? this.status,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
 }
 
 class CustomerAddress {
   final String id;
   final String customerId;
   final String label;
+  final String addressType; // M17: service | billing | postal | other
   final String addressLine1;
   final String? addressLine2;
   final String city;
@@ -77,12 +113,14 @@ class CustomerAddress {
   final String? postcode;
   final String country;
   final bool isPrimary;
+  final String status; // M17: active | archived
   final String createdAt;
 
   const CustomerAddress({
     required this.id,
     required this.customerId,
     required this.label,
+    this.addressType = 'service',
     required this.addressLine1,
     this.addressLine2,
     required this.city,
@@ -90,6 +128,7 @@ class CustomerAddress {
     this.postcode,
     required this.country,
     required this.isPrimary,
+    this.status = 'active',
     required this.createdAt,
   });
 
@@ -97,6 +136,7 @@ class CustomerAddress {
         id: j['id'] as String,
         customerId: j['customer_id'] as String,
         label: j['label'] as String? ?? '',
+        addressType: (j['address_type'] as String?) ?? 'service',
         addressLine1: j['address_line1'] as String,
         addressLine2: j['address_line2'] as String?,
         city: j['city'] as String,
@@ -104,8 +144,38 @@ class CustomerAddress {
         postcode: j['postcode'] as String?,
         country: j['country'] as String,
         isPrimary: j['is_primary'] as bool? ?? false,
+        status: (j['status'] as String?) ?? 'active',
         createdAt: j['created_at'] as String,
       );
+
+  CustomerAddress copyWith({
+    String? label,
+    String? addressType,
+    String? addressLine1,
+    String? addressLine2,
+    String? city,
+    String? state,
+    String? postcode,
+    String? country,
+    bool? isPrimary,
+    String? status,
+  }) {
+    return CustomerAddress(
+      id: id,
+      customerId: customerId,
+      label: label ?? this.label,
+      addressType: addressType ?? this.addressType,
+      addressLine1: addressLine1 ?? this.addressLine1,
+      addressLine2: addressLine2 ?? this.addressLine2,
+      city: city ?? this.city,
+      state: state ?? this.state,
+      postcode: postcode ?? this.postcode,
+      country: country ?? this.country,
+      isPrimary: isPrimary ?? this.isPrimary,
+      status: status ?? this.status,
+      createdAt: createdAt,
+    );
+  }
 }
 
 class CustomerContact {
@@ -474,11 +544,13 @@ class CustomerDetailNotifier
     String? postcode,
     required String country,
     String label = '',
+    String addressType = 'service',
     bool isPrimary = false,
   }) async {
     try {
       final resp = await _api.post('/customers/$_id/addresses', data: {
         'label': label,
+        'address_type': addressType,
         'address_line1': addressLine1,
         'address_line2': addressLine2 ?? '',
         'city': city,
@@ -493,26 +565,67 @@ class CustomerDetailNotifier
       if (current != null) {
         final newAddrs = isPrimary
             ? [
-                ...current.addresses
-                    .map((a) => a.isPrimary
-                        ? CustomerAddress(
-                            id: a.id,
-                            customerId: a.customerId,
-                            label: a.label,
-                            addressLine1: a.addressLine1,
-                            addressLine2: a.addressLine2,
-                            city: a.city,
-                            state: a.state,
-                            postcode: a.postcode,
-                            country: a.country,
-                            isPrimary: false,
-                            createdAt: a.createdAt,
-                          )
-                        : a),
+                ...current.addresses.map((a) =>
+                    a.isPrimary ? a.copyWith(isPrimary: false) : a),
                 addr,
               ]
             : [...current.addresses, addr];
         this.state = AsyncValue.data(current.copyWith(addresses: newAddrs));
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// M17 — patch a single address. Backend validates type, postcode and
+  /// status transitions. On success the local state is reconciled.
+  Future<bool> updateAddress(
+    String addressId,
+    Map<String, dynamic> patch,
+  ) async {
+    try {
+      final resp = await _api.patch(
+        '/customers/$_id/addresses/$addressId',
+        data: patch,
+      );
+      final updated =
+          CustomerAddress.fromJson(resp.data as Map<String, dynamic>);
+      final current = state.valueOrNull;
+      if (current != null) {
+        final newAddrs = current.addresses.map((a) {
+          if (a.id != updated.id) {
+            // If we just promoted another row to primary, demote the old one.
+            if (updated.isPrimary && a.isPrimary) {
+              return a.copyWith(isPrimary: false);
+            }
+            return a;
+          }
+          return updated;
+        }).toList();
+        state = AsyncValue.data(current.copyWith(addresses: newAddrs));
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// M17 — archive (status='archived') or restore (status='active') an
+  /// address. Soft delete is the canonical path; this calls the
+  /// dedicated /status endpoint on the top-level resource.
+  Future<bool> setAddressStatus(String addressId, String status) async {
+    try {
+      await _api.post(
+        '/customer_addresses/$addressId/status',
+        data: {'status': status},
+      );
+      final current = state.valueOrNull;
+      if (current != null) {
+        final newAddrs = current.addresses
+            .map((a) => a.id == addressId ? a.copyWith(status: status) : a)
+            .toList();
+        state = AsyncValue.data(current.copyWith(addresses: newAddrs));
       }
       return true;
     } catch (_) {
@@ -572,6 +685,22 @@ class CustomerDetailNotifier
         state = AsyncValue.data(current.copyWith(
             addresses:
                 current.addresses.where((a) => a.id != addressId).toList()));
+      }
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// M15 — move the customer through the lifecycle (lead/active/inactive/archived).
+  /// Backend validates the transition; on conflict the call returns false.
+  Future<bool> setStatus(String status) async {
+    try {
+      await _api.post('/customers/$_id/status', data: {'status': status});
+      final current = state.valueOrNull;
+      if (current != null) {
+        state = AsyncValue.data(current.copyWith(
+            customer: current.customer.copyWith(status: status)));
       }
       return true;
     } catch (_) {
