@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/stripe/stripe-go/v79"
+	"github.com/stripe/stripe-go/v79/checkout/session"
 	"go.uber.org/zap"
 
 	"github.com/tradie/api/internal/config"
@@ -768,27 +770,108 @@ func (h *Handler) GetReceipt(w http.ResponseWriter, r *http.Request) {
 }
 
 // ── CreatePaymentLink ──────────────────────────────────────────
+//
+// Returns a Stripe Checkout URL when STRIPE_SECRET_KEY is configured;
+// the customer pays on Stripe's hosted page and the resulting
+// checkout.session.completed webhook (handled in subscription/) marks
+// the invoice paid via metadata.invoice_id.
+//
+// Falls back to a token-based link when Stripe is not configured so
+// dev environments stay working without billing credentials.
 func (h *Handler) CreatePaymentLink(w http.ResponseWriter, r *http.Request) {
 	bizID := middleware.BusinessIDFromCtx(r.Context())
 	claims := middleware.ClaimsFromCtx(r.Context())
 	id := chi.URLParam(r, "id")
 
-	var exists bool
-	_ = h.db.QueryRow(r.Context(),
-		`SELECT EXISTS(SELECT 1 FROM invoices WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL)`,
+	var (
+		invoiceNumber string
+		total         float64
+		amountPaid    float64
+		customerEmail *string
+	)
+	err := h.db.QueryRow(r.Context(), `
+		SELECT i.invoice_number, i.total, COALESCE(i.amount_paid, 0), c.email
+		  FROM invoices i
+		  LEFT JOIN customers c ON c.id = i.customer_id
+		 WHERE i.id=$1 AND i.business_id=$2 AND i.deleted_at IS NULL`,
 		id, bizID,
-	).Scan(&exists)
-	if !exists {
+	).Scan(&invoiceNumber, &total, &amountPaid, &customerEmail)
+	if err != nil {
 		respond(w, 404, map[string]string{"error": "invoice_not_found"})
 		return
 	}
 
+	amountDue := total - amountPaid
+	if amountDue <= 0 {
+		respond(w, 400, map[string]string{"error": "invoice_already_paid"})
+		return
+	}
+
+	// Stripe Checkout path — preferred when configured.
+	if h.cfg.StripeSecretKey != "" {
+		stripe.Key = h.cfg.StripeSecretKey
+		successURL := fmt.Sprintf("%s/invoices/%s?paid=1", h.cfg.FrontendURL, id)
+		cancelURL := fmt.Sprintf("%s/invoices/%s?canceled=1", h.cfg.FrontendURL, id)
+		params := &stripe.CheckoutSessionParams{
+			Mode:       stripe.String(string(stripe.CheckoutSessionModePayment)),
+			SuccessURL: stripe.String(successURL),
+			CancelURL:  stripe.String(cancelURL),
+			LineItems: []*stripe.CheckoutSessionLineItemParams{{
+				Quantity: stripe.Int64(1),
+				PriceData: &stripe.CheckoutSessionLineItemPriceDataParams{
+					Currency:   stripe.String(string(stripe.CurrencyAUD)),
+					UnitAmount: stripe.Int64(int64(amountDue * 100)),
+					ProductData: &stripe.CheckoutSessionLineItemPriceDataProductDataParams{
+						Name: stripe.String("Invoice " + invoiceNumber),
+					},
+				},
+			}},
+			Metadata: map[string]string{
+				"invoice_id":  id,
+				"business_id": bizID.String(),
+			},
+		}
+		if customerEmail != nil && *customerEmail != "" {
+			params.CustomerEmail = stripe.String(*customerEmail)
+		}
+		sess, sessErr := session.New(params)
+		if sessErr != nil {
+			h.log.Error("stripe checkout session", zap.Error(sessErr))
+			respond(w, 502, map[string]string{"error": "billing_provider_error"})
+			return
+		}
+
+		_, _ = h.db.Exec(r.Context(), `
+			INSERT INTO payment_links (invoice_id, business_id, token, expires_at, created_by, stripe_session_id)
+			VALUES ($1,$2,$3,$4,$5,$6)
+			ON CONFLICT (invoice_id) DO UPDATE
+			SET token=$3, expires_at=$4, created_by=$5, stripe_session_id=$6`,
+			id, bizID, sess.ID, time.Now().Add(24*time.Hour), claims.UserID, sess.ID,
+		)
+
+		h.audit.Log(r.Context(), middleware.AuditEntry{
+			BusinessID: bizID,
+			UserID:     claims.UserID,
+			Action:     "create_payment_link",
+			EntityType: "invoice",
+			EntityID:   uuid.MustParse(id),
+			NewData:    map[string]interface{}{"provider": "stripe", "session_id": sess.ID},
+		})
+
+		respond(w, 200, map[string]string{
+			"payment_url": sess.URL,
+			"provider":    "stripe",
+			"session_id":  sess.ID,
+		})
+		return
+	}
+
+	// Fallback — token-based link for dev / unconfigured environments.
 	token, err := generateToken()
 	if err != nil {
 		respond(w, 500, map[string]string{"error": "internal_error"})
 		return
 	}
-
 	expiresAt := time.Now().Add(7 * 24 * time.Hour)
 	_, dbErr := h.db.Exec(r.Context(), `
 		INSERT INTO payment_links (invoice_id, business_id, token, expires_at, created_by)
@@ -805,12 +888,12 @@ func (h *Handler) CreatePaymentLink(w http.ResponseWriter, r *http.Request) {
 
 	frontendURL := h.cfg.FrontendURL
 	if frontendURL == "" {
-		frontendURL = "https://app.tradie.com.au"
+		frontendURL = "https://defecexinso.com"
 	}
-
 	respond(w, 200, map[string]string{
 		"payment_url": fmt.Sprintf("%s/pay/%s", frontendURL, token),
 		"token":       token,
+		"provider":    "token",
 	})
 }
 

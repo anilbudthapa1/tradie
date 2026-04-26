@@ -261,6 +261,13 @@ func (h *Handler) StripeWebhook(w http.ResponseWriter, r *http.Request) {
 // ── Internal ──────────────────────────────────────────────────────
 
 func (h *Handler) handleCheckoutComplete(r *http.Request, sess *stripe.CheckoutSession) {
+	// Invoice payment (one-time checkout) — has invoice_id in metadata.
+	if invoiceID := sess.Metadata["invoice_id"]; invoiceID != "" {
+		h.handleInvoicePaymentComplete(r, sess, invoiceID)
+		return
+	}
+
+	// Subscription checkout.
 	bizID := sess.Metadata["business_id"]
 	if bizID == "" || sess.Subscription == nil {
 		return
@@ -279,6 +286,73 @@ func (h *Handler) handleCheckoutComplete(r *http.Request, sess *stripe.CheckoutS
 		bizID, planID, subID,
 		time.Unix(sess.Subscription.CurrentPeriodStart, 0),
 		time.Unix(sess.Subscription.CurrentPeriodEnd, 0))
+}
+
+// handleInvoicePaymentComplete records a one-time invoice payment that
+// landed via Stripe Checkout. The session.amount_total is in cents;
+// invoice_payments and invoices.amount_paid are stored in dollars.
+func (h *Handler) handleInvoicePaymentComplete(r *http.Request, sess *stripe.CheckoutSession, invoiceID string) {
+	bizID := sess.Metadata["business_id"]
+	if bizID == "" {
+		h.log.Warn("stripe invoice checkout missing business_id metadata",
+			zap.String("session_id", sess.ID))
+		return
+	}
+	amount := float64(sess.AmountTotal) / 100.0
+
+	// Idempotency: bail if we've already recorded this Stripe payment.
+	var dup int
+	_ = h.db.QueryRow(r.Context(),
+		`SELECT COUNT(1) FROM invoice_payments WHERE reference=$1`, sess.ID,
+	).Scan(&dup)
+	if dup > 0 {
+		return
+	}
+
+	tx, err := h.db.Begin(r.Context())
+	if err != nil {
+		h.log.Error("stripe invoice tx begin", zap.Error(err))
+		return
+	}
+	defer tx.Rollback(r.Context())
+
+	if _, err := tx.Exec(r.Context(),
+		`INSERT INTO invoice_payments (invoice_id, business_id, amount, payment_method, reference, paid_at)
+		 VALUES ($1,$2,$3,'stripe',$4, NOW())`,
+		invoiceID, bizID, amount, sess.ID,
+	); err != nil {
+		h.log.Error("stripe invoice payment insert", zap.Error(err))
+		return
+	}
+
+	if _, err := tx.Exec(r.Context(),
+		`UPDATE invoices
+		    SET amount_paid = COALESCE(amount_paid, 0) + $3,
+		        status = CASE
+		                   WHEN COALESCE(amount_paid, 0) + $3 >= total THEN 'paid'
+		                   ELSE 'partial'
+		                 END,
+		        paid_at = CASE
+		                    WHEN COALESCE(amount_paid, 0) + $3 >= total THEN NOW()
+		                    ELSE paid_at
+		                  END,
+		        updated_at = NOW()
+		  WHERE id=$1 AND business_id=$2 AND deleted_at IS NULL`,
+		invoiceID, bizID, amount,
+	); err != nil {
+		h.log.Error("stripe invoice update", zap.Error(err))
+		return
+	}
+
+	if err := tx.Commit(r.Context()); err != nil {
+		h.log.Error("stripe invoice tx commit", zap.Error(err))
+		return
+	}
+
+	h.log.Info("stripe invoice payment recorded",
+		zap.String("invoice_id", invoiceID),
+		zap.String("session_id", sess.ID),
+		zap.Float64("amount", amount))
 }
 
 func (h *Handler) handleSubscriptionUpdated(r *http.Request, sub *stripe.Subscription) {
