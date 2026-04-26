@@ -238,6 +238,35 @@ class SettingsNotifier extends StateNotifier<AsyncValue<void>> {
     }
   }
 
+  // ── OAuth integrations (M115-M118) — added by batch 12 ─────────
+  Future<Map<String, dynamic>?> getIntegrationsStatus() async {
+    try {
+      final resp = await _api.get('/integrations/status');
+      return (resp.data as Map<String, dynamic>)['providers']
+          as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> startOAuthConnect(String provider) async {
+    try {
+      final resp = await _api.get('/integrations/$provider/connect');
+      return (resp.data as Map<String, dynamic>)['url'] as String?;
+    } on DioException catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> disconnectIntegration(String provider) async {
+    try {
+      await _api.delete('/integrations/$provider');
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<Map<String, dynamic>?> getStripeStatus() async {
     try {
       final resp = await _api.get('/settings/integrations/stripe/status');

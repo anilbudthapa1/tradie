@@ -20,6 +20,17 @@ final stripeStatusProvider = FutureProvider<Map<String, dynamic>>((ref) async {
   }
 });
 
+/// Loads OAuth connection state for Xero/MYOB/QuickBooks/Google Calendar.
+final integrationsStatusProvider =
+    FutureProvider<Map<String, dynamic>>((ref) async {
+  try {
+    final notifier = ref.read(settingsNotifierProvider.notifier);
+    return (await notifier.getIntegrationsStatus()) ?? {};
+  } catch (_) {
+    return {};
+  }
+});
+
 /// Persists the Google Maps toggle in shared prefs.
 final mapsEnabledProvider = StateNotifierProvider<_MapsToggleNotifier, bool>(
   (ref) => _MapsToggleNotifier(),
@@ -87,20 +98,28 @@ class IntegrationsScreen extends ConsumerWidget {
           // ── Accounting ───────────────────────────────────────────
           _SectionHeader(title: 'Accounting'),
           const SizedBox(height: 8),
-          _IntegrationTile(
+          const _OAuthTile(
+            providerSlug: 'xero',
             icon: Iconsax.document_text,
-            iconColor: const Color(0xFF13B5EA),
+            iconColor: Color(0xFF13B5EA),
             name: 'Xero',
             description: 'Sync invoices, expenses and GST reporting',
-            status: _IntegrationStatus.comingSoon,
           ),
           const SizedBox(height: 8),
-          _IntegrationTile(
+          const _OAuthTile(
+            providerSlug: 'myob',
             icon: Iconsax.chart_square,
-            iconColor: const Color(0xFF5542F6),
+            iconColor: Color(0xFF5542F6),
             name: 'MYOB',
             description: 'Export payroll, invoices and BAS data',
-            status: _IntegrationStatus.comingSoon,
+          ),
+          const SizedBox(height: 8),
+          const _OAuthTile(
+            providerSlug: 'quickbooks',
+            icon: Iconsax.calculator,
+            iconColor: Color(0xFF2CA01C),
+            name: 'QuickBooks',
+            description: 'Sync chart of accounts and journal entries',
           ),
 
           const SizedBox(height: 24),
@@ -108,12 +127,12 @@ class IntegrationsScreen extends ConsumerWidget {
           // ── Scheduling ───────────────────────────────────────────
           _SectionHeader(title: 'Scheduling'),
           const SizedBox(height: 8),
-          _IntegrationTile(
+          const _OAuthTile(
+            providerSlug: 'google_calendar',
             icon: Iconsax.calendar,
-            iconColor: const Color(0xFF1A73E8),
+            iconColor: Color(0xFF1A73E8),
             name: 'Google Calendar',
             description: 'Two-way sync jobs and appointments',
-            status: _IntegrationStatus.comingSoon,
           ),
 
           const SizedBox(height: 24),
@@ -545,6 +564,110 @@ class _OutlineButton extends StatelessWidget {
             fontSize: 13, fontWeight: FontWeight.w600),
       ),
     );
+  }
+}
+
+// ── OAuth Tile (Xero / MYOB / QuickBooks / Google Calendar) ───────────────────
+
+class _OAuthTile extends ConsumerWidget {
+  final String providerSlug;
+  final IconData icon;
+  final Color iconColor;
+  final String name;
+  final String description;
+
+  const _OAuthTile({
+    required this.providerSlug,
+    required this.icon,
+    required this.iconColor,
+    required this.name,
+    required this.description,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final statusAsync = ref.watch(integrationsStatusProvider);
+
+    return statusAsync.when(
+      loading: () => const _TileShimmer(),
+      error: (_, __) => _IntegrationTile(
+        icon: icon,
+        iconColor: iconColor,
+        name: name,
+        description: description,
+        status: _IntegrationStatus.disconnected,
+      ),
+      data: (data) {
+        final entry = data[providerSlug] as Map?;
+        final connected = (entry?['connected'] as bool?) ?? false;
+        final configured = (entry?['configured'] as bool?) ?? false;
+
+        if (!configured) {
+          return _IntegrationTile(
+            icon: icon,
+            iconColor: iconColor,
+            name: name,
+            description: description,
+            status: _IntegrationStatus.comingSoon,
+          );
+        }
+
+        return _IntegrationTile(
+          icon: icon,
+          iconColor: iconColor,
+          name: name,
+          description: description,
+          status: connected
+              ? _IntegrationStatus.connected
+              : _IntegrationStatus.disconnected,
+          actionWidget: connected
+              ? _OutlineButton(
+                  icon: Iconsax.close_circle,
+                  label: 'Disconnect',
+                  onTap: () => _disconnect(context, ref),
+                )
+              : _ConnectButton(
+                  label: 'Connect',
+                  onTap: () => _connect(context, ref),
+                ),
+        );
+      },
+    );
+  }
+
+  Future<void> _connect(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(settingsNotifierProvider.notifier);
+    final url = await notifier.startOAuthConnect(providerSlug);
+    if (url == null || url.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Could not start $name connection'),
+            backgroundColor: TradieColors.alertRed,
+          ),
+        );
+      }
+      return;
+    }
+    final uri = Uri.parse(url);
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  Future<void> _disconnect(BuildContext context, WidgetRef ref) async {
+    final notifier = ref.read(settingsNotifierProvider.notifier);
+    final ok = await notifier.disconnectIntegration(providerSlug);
+    if (context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok ? '$name disconnected' : 'Disconnect failed'),
+          backgroundColor:
+              ok ? TradieColors.successGreen : TradieColors.alertRed,
+        ),
+      );
+    }
+    ref.invalidate(integrationsStatusProvider);
   }
 }
 
