@@ -33,6 +33,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"net/http"
 	"strconv"
@@ -47,6 +48,7 @@ import (
 
 	"github.com/tradie/api/internal/config"
 	"github.com/tradie/api/internal/middleware"
+	"github.com/tradie/api/internal/services/email"
 )
 
 // ── Audit event names (spec §Audit Events) ───────────────────────
@@ -85,10 +87,11 @@ type Handler struct {
 	db    *pgxpool.Pool
 	log   *zap.Logger
 	audit *middleware.AuditService
+	email *email.Service
 }
 
-func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, audit *middleware.AuditService) *Handler {
-	return &Handler{cfg: cfg, db: db, log: log, audit: audit}
+func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, audit *middleware.AuditService, emailSvc *email.Service) *Handler {
+	return &Handler{cfg: cfg, db: db, log: log, audit: audit, email: emailSvc}
 }
 
 // ── Row shape ───────────────────────────────────────────────────
@@ -312,9 +315,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// TODO: dispatch the link via the configured channel (email/sms).
-	// Today this is the noop path — the audit captures intent.
-
 	h.audit.Log(r.Context(), middleware.AuditEntry{
 		BusinessID: bizID,
 		UserID:     claims.UserID,
@@ -326,6 +326,44 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		},
 		IPAddress: r.RemoteAddr,
 	})
+
+	// Dispatch the public link to the customer. SMS path is logged
+	// only — Twilio wiring lives in services/notifications and we
+	// route through email here as the safe default; SMS will be added
+	// when the dispatcher gains channel routing.
+	if strings.EqualFold(req.Channel, "email") {
+		var (
+			toEmail string
+			toName  string
+		)
+		err := h.db.QueryRow(r.Context(),
+			`SELECT email,
+			        NULLIF(TRIM(COALESCE(first_name,'') || ' ' || COALESCE(last_name,'')), '')
+			   FROM customers
+			  WHERE id = $1 AND business_id = $2`,
+			customerID, bizID,
+		).Scan(&toEmail, &toName)
+		if err == nil && toEmail != "" && rr.Token != nil {
+			if toName == "" {
+				toName = toEmail
+			}
+			link := fmt.Sprintf("%s/reviews/%s", h.cfg.FrontendURL, *rr.Token)
+			body := fmt.Sprintf(
+				`<p>Hi %s,</p>
+				 <p>Thanks for the recent work — we'd love your feedback.</p>
+				 <p><a href="%s">Leave a review</a></p>
+				 <p>This link expires on %s.</p>`,
+				html.EscapeString(toName),
+				link,
+				rr.ExpiresAt.Format("2 Jan 2006"),
+			)
+			if sendErr := h.email.Send(r.Context(), toEmail, toName, "How did we do?", body); sendErr != nil {
+				h.log.Warn("review request email failed",
+					zap.String("review_id", rr.ID.String()),
+					zap.Error(sendErr))
+			}
+		}
+	}
 
 	// On create, return the row WITH the token so the caller can build
 	// the public link (e.g. for manual delivery). It's the only place

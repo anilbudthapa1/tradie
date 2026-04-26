@@ -16,6 +16,7 @@ import (
 	"github.com/tradie/api/internal/config"
 	"github.com/tradie/api/internal/middleware"
 	"github.com/tradie/api/internal/models"
+	"github.com/tradie/api/internal/services/email"
 )
 
 type Handler struct {
@@ -23,10 +24,11 @@ type Handler struct {
 	db    *pgxpool.Pool
 	log   *zap.Logger
 	audit *middleware.AuditService
+	email *email.Service
 }
 
-func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, audit *middleware.AuditService) *Handler {
-	return &Handler{cfg: cfg, db: db, log: log, audit: audit}
+func NewHandler(cfg *config.Config, db *pgxpool.Pool, log *zap.Logger, audit *middleware.AuditService, emailSvc *email.Service) *Handler {
+	return &Handler{cfg: cfg, db: db, log: log, audit: audit, email: emailSvc}
 }
 
 // ── List ───────────────────────────────────────────────────────
@@ -406,14 +408,27 @@ func (h *Handler) Send(w http.ResponseWriter, r *http.Request) {
 		Status        string     `json:"status"`
 		SentAt        *time.Time `json:"sent_at"`
 	}
-	var result SentResult
+	var (
+		result        SentResult
+		customerEmail *string
+		customerName  *string
+		amountDue     float64
+		dueDate       *time.Time
+	)
 	err = h.db.QueryRow(r.Context(), `
-		UPDATE invoices
+		UPDATE invoices i
 		SET status='sent', sent_at=NOW(), updated_at=NOW()
-		WHERE id=$1 AND business_id=$2 AND status='draft' AND deleted_at IS NULL
-		RETURNING id, invoice_number, status, sent_at`,
+		FROM customers c
+		WHERE i.id=$1 AND i.business_id=$2 AND i.status='draft' AND i.deleted_at IS NULL
+		  AND c.id = i.customer_id
+		RETURNING i.id, i.invoice_number, i.status, i.sent_at,
+		          c.email,
+		          NULLIF(TRIM(COALESCE(c.first_name,'') || ' ' || COALESCE(c.last_name,'')), ''),
+		          (i.total - COALESCE(i.amount_paid, 0))::float8,
+		          i.due_date`,
 		id, bizID,
-	).Scan(&result.ID, &result.InvoiceNumber, &result.Status, &result.SentAt)
+	).Scan(&result.ID, &result.InvoiceNumber, &result.Status, &result.SentAt,
+		&customerEmail, &customerName, &amountDue, &dueDate)
 	if err != nil {
 		respond(w, 400, map[string]string{"error": "invoice_not_draft_or_not_found"})
 		return
@@ -426,6 +441,32 @@ func (h *Handler) Send(w http.ResponseWriter, r *http.Request) {
 		EntityType: "invoice",
 		EntityID:   invoiceID,
 	})
+
+	if customerEmail != nil && *customerEmail != "" {
+		name := result.InvoiceNumber
+		if customerName != nil {
+			name = *customerName
+		}
+		link := fmt.Sprintf("%s/invoices/%s", h.cfg.FrontendURL, result.ID)
+		due := ""
+		if dueDate != nil {
+			due = fmt.Sprintf("<p>Due: %s</p>", dueDate.Format("2 Jan 2006"))
+		}
+		body := fmt.Sprintf(
+			`<p>Hi %s,</p>
+			 <p>Invoice <strong>%s</strong> for $%.2f is ready.</p>
+			 %s
+			 <p><a href="%s">View invoice</a></p>
+			 <p>Thanks,<br>Tradie Job Manager</p>`,
+			name, result.InvoiceNumber, amountDue, due, link,
+		)
+		subject := fmt.Sprintf("Invoice %s — $%.2f", result.InvoiceNumber, amountDue)
+		if sendErr := h.email.Send(r.Context(), *customerEmail, name, subject, body); sendErr != nil {
+			h.log.Warn("invoice email send failed",
+				zap.String("invoice_id", result.ID.String()),
+				zap.Error(sendErr))
+		}
+	}
 
 	respond(w, 200, result)
 }
